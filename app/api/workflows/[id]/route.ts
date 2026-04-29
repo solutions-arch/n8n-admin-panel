@@ -96,6 +96,98 @@ export async function PATCH(
     }
 }
 
+export async function GET(
+    request: Request,
+    context: RouteContext
+) {
+    try {
+        const { id } = await context.params
+
+        const config = getN8nConfig()
+
+        if ('error' in config) {
+            return config.error
+        }
+
+        const response = await fetch(`${config.baseUrl}/workflows/${id}`, {
+            method: 'GET',
+            headers: {
+                'X-N8N-API-KEY': config.apiKey,
+                Accept: 'application/json',
+            },
+            cache: 'no-store',
+        })
+
+        const data = await parseResponse(response)
+
+        if (!response.ok) {
+            return NextResponse.json(
+                {
+                    error: 'Failed to fetch workflow details',
+                    status: response.status,
+                    details: data,
+                },
+                { status: response.status }
+            )
+        }
+
+        const workflow = Array.isArray(data) ? data[0] : data
+
+        return NextResponse.json({
+            id: workflow.id,
+            name: workflow.name,
+            description: workflow.description || null,
+            active: workflow.active,
+            isArchived: workflow.isArchived,
+            createdAt: workflow.createdAt,
+            updatedAt: workflow.updatedAt,
+            versionId: workflow.versionId,
+            activeVersionId: workflow.activeVersionId,
+            versionCounter: workflow.versionCounter,
+            triggerCount: workflow.triggerCount,
+            tags: workflow.tags || [],
+            settings: {
+                timeSavedMode: workflow.settings?.timeSavedMode || null,
+                timeSavedPerExecution:
+                    workflow.settings?.timeSavedPerExecution ?? null,
+                executionOrder: workflow.settings?.executionOrder || null,
+                availableInMCP: workflow.settings?.availableInMCP ?? null,
+            },
+            activeVersion: {
+                versionId: workflow.activeVersion?.versionId || null,
+                workflowId: workflow.activeVersion?.workflowId || null,
+                createdAt: workflow.activeVersion?.createdAt || null,
+                updatedAt: workflow.activeVersion?.updatedAt || null,
+                authors: workflow.activeVersion?.authors || null,
+                name: workflow.activeVersion?.name || null,
+                description: workflow.activeVersion?.description || null,
+            },
+            shared: workflow.shared?.map((share: any) => ({
+                role: share.role,
+                workflowId: share.workflowId,
+                projectId: share.projectId,
+                project: share.project
+                    ? {
+                        id: share.project.id,
+                        name: share.project.name,
+                        type: share.project.type,
+                    }
+                    : null,
+            })) || [],
+        })
+    } catch (error) {
+        console.error('Workflow GET error:', error)
+
+        return NextResponse.json(
+            {
+                error: 'Internal server error',
+                detail: String(error),
+            },
+            { status: 500 }
+        )
+    }
+}
+
 export async function DELETE(
     request: Request,
     context: RouteContext

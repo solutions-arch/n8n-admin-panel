@@ -71,13 +71,14 @@ function getAuthorName(value: any) {
     }
 
     if (Array.isArray(value)) {
-        return value
+        const names = value
             .map(author => {
                 if (typeof author === 'string') return author
                 return author?.name || author?.email || ''
             })
             .filter(Boolean)
-            .join(', ') || null
+
+        return names.length > 0 ? names.join(', ') : null
     }
 
     if (typeof value === 'object') {
@@ -108,6 +109,54 @@ function getLastModifiedBy(workflow: any, versionDetails?: any) {
         getAuthorName(workflow.lastModifiedByUser)
 
     return fromVersion || fromList || null
+}
+
+function getWorkflowDescription(workflow: any, versionDetails?: any) {
+    return (
+        versionDetails?.description ||
+        versionDetails?.activeVersion?.description ||
+        workflow.description ||
+        workflow.activeVersion?.description ||
+        null
+    )
+}
+
+function getEstimatedTimeSaved(workflow: any, versionDetails?: any) {
+    const settings =
+        versionDetails?.settings ||
+        versionDetails?.activeVersion?.settings ||
+        workflow?.settings ||
+        workflow?.activeVersion?.settings ||
+        {}
+
+    const minutes =
+        settings.timeSavedPerExecution ??
+        settings.estimatedTimeSaved ??
+        settings.timeSaved ??
+        settings.timeSavedInMinutes ??
+        settings.timeSavedValue ??
+        null
+
+    const mode = settings.timeSavedMode || null
+
+    return {
+        minutes,
+        mode,
+    }
+}
+
+function formatEstimatedTimeSaved(minutes: any) {
+    if (minutes === null || minutes === undefined || minutes === '') {
+        return 'No estimated time saved set.'
+    }
+
+    const numericMinutes = Number(minutes)
+
+    if (Number.isNaN(numericMinutes)) {
+        return String(minutes)
+    }
+
+    return `${numericMinutes} minute${numericMinutes === 1 ? '' : 's'} per execution`
 }
 
 async function fetchJson(url: string) {
@@ -147,8 +196,14 @@ export default function WorkflowsPage() {
 
         try {
             const data = await fetchJson('/api/workflows')
+
             setWorkflows(data.data || [])
             setLastRefreshed(new Date())
+
+            // Clear cached version details so updated descriptions/time-saved values can reload
+            setVersionDetails({})
+            setVersionError({})
+            setExpandedWorkflowId(null)
         } catch (error) {
             console.error('Failed to fetch workflows:', error)
             setErrorMessage('Failed to fetch workflows.')
@@ -236,7 +291,7 @@ export default function WorkflowsPage() {
         }))
 
         try {
-            const data = await fetchJson(`/api/workflows/${workflowId}/${versionId}`)
+            const data = await fetchJson(`/api/workflows/${workflowId}`)
 
             setVersionDetails(prev => ({
                 ...prev,
@@ -280,12 +335,20 @@ export default function WorkflowsPage() {
                 const id = String(workflow.id || '').toLowerCase()
                 const tags = getTagNames(workflow).join(' ').toLowerCase()
                 const versionId = String(getVersionId(workflow) || '').toLowerCase()
+                const description = String(
+                    getWorkflowDescription(workflow, versionDetails[workflow.id]) || ''
+                ).toLowerCase()
+                const modifiedBy = String(
+                    getLastModifiedBy(workflow, versionDetails[workflow.id]) || ''
+                ).toLowerCase()
 
                 return (
                     name.includes(query) ||
                     id.includes(query) ||
                     tags.includes(query) ||
-                    versionId.includes(query)
+                    versionId.includes(query) ||
+                    description.includes(query) ||
+                    modifiedBy.includes(query)
                 )
             })
             .sort((a, b) => {
@@ -322,7 +385,7 @@ export default function WorkflowsPage() {
 
                 return 0
             })
-    }, [workflows, searchQuery, sortOption, statusFilter])
+    }, [workflows, searchQuery, sortOption, statusFilter, versionDetails])
 
     const clearFilters = () => {
         setSearchQuery('')
@@ -472,7 +535,7 @@ export default function WorkflowsPage() {
                         type="text"
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Search by workflow name, ID, tag, or version ID..."
+                        placeholder="Search by workflow name, ID, tag, modifier, or description..."
                         className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
                     />
 
@@ -557,6 +620,14 @@ export default function WorkflowsPage() {
                                 )
                                 const versionId = getVersionId(workflow)
                                 const isExpanded = expandedWorkflowId === workflow.id
+                                const description = getWorkflowDescription(
+                                    workflow,
+                                    workflowVersionDetails
+                                )
+                                const estimatedTimeSaved = getEstimatedTimeSaved(
+                                    workflow,
+                                    workflowVersionDetails
+                                )
 
                                 return (
                                     <Fragment key={workflow.id}>
@@ -705,7 +776,7 @@ export default function WorkflowsPage() {
                                                     className="bg-gray-50 p-4 dark:bg-gray-950/60"
                                                 >
                                                     <div className="rounded-lg border border-gray-100 bg-white p-4 text-sm dark:border-gray-800 dark:bg-gray-900">
-                                                        <div className="grid gap-3 md:grid-cols-3">
+                                                        <div className="grid gap-4 md:grid-cols-4">
                                                             <div>
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Version ID
@@ -742,6 +813,30 @@ export default function WorkflowsPage() {
                                                                     )}
                                                                 </p>
                                                             </div>
+
+                                                            <div>
+                                                                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                                                    Estimated Time Saved
+                                                                </p>
+                                                                <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                                                                    {formatEstimatedTimeSaved(
+                                                                        estimatedTimeSaved.minutes
+                                                                    )}
+                                                                    {estimatedTimeSaved.mode
+                                                                        ? ` · Mode: ${estimatedTimeSaved.mode}`
+                                                                        : ''}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+
+                                                        <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
+                                                            <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                                                Description
+                                                            </p>
+
+                                                            <p className="mt-1 whitespace-pre-line text-sm text-gray-600 dark:text-gray-300">
+                                                                {description || 'No description added yet.'}
+                                                            </p>
                                                         </div>
 
                                                         {versionError[workflow.id] && (
