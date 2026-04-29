@@ -8,6 +8,35 @@ type RouteContext = {
     }>
 }
 
+function getN8nConfig() {
+    const baseUrl = process.env.N8N_BASE_URL
+    const apiKey = process.env.N8N_API_KEY
+
+    if (!baseUrl || !apiKey) {
+        return {
+            error: NextResponse.json(
+                { error: 'Missing N8N_BASE_URL or N8N_API_KEY' },
+                { status: 500 }
+            ),
+        }
+    }
+
+    return {
+        baseUrl: baseUrl.replace(/\/$/, ''),
+        apiKey,
+    }
+}
+
+async function parseResponse(response: Response) {
+    const text = await response.text()
+
+    try {
+        return text ? JSON.parse(text) : {}
+    } catch {
+        return { raw: text }
+    }
+}
+
 export async function PATCH(
     request: Request,
     context: RouteContext
@@ -16,39 +45,30 @@ export async function PATCH(
         const { id } = await context.params
         const body = await request.json()
 
-        const baseUrl = process.env.N8N_BASE_URL
-        const apiKey = process.env.N8N_API_KEY
+        const config = getN8nConfig()
 
-        if (!baseUrl || !apiKey) {
-            return NextResponse.json(
-                { error: 'Missing N8N_BASE_URL or N8N_API_KEY' },
-                { status: 500 }
-            )
+        if ('error' in config) {
+            return config.error
         }
 
-        const response = await fetch(`${baseUrl}/workflows/${id}`, {
-            method: 'PATCH',
+        const shouldActivate = Boolean(body.active)
+        const action = shouldActivate ? 'activate' : 'deactivate'
+
+        const response = await fetch(`${config.baseUrl}/workflows/${id}/${action}`, {
+            method: 'POST',
             headers: {
-                'X-N8N-API-KEY': apiKey,
-                'Content-Type': 'application/json',
+                'X-N8N-API-KEY': config.apiKey,
+                Accept: 'application/json',
             },
-            body: JSON.stringify(body),
+            cache: 'no-store',
         })
 
-        const text = await response.text()
-
-        let data: any = {}
-
-        try {
-            data = text ? JSON.parse(text) : {}
-        } catch {
-            data = { raw: text }
-        }
+        const data = await parseResponse(response)
 
         if (!response.ok) {
             return NextResponse.json(
                 {
-                    error: 'Failed to update workflow',
+                    error: `Failed to ${action} workflow`,
                     status: response.status,
                     details: data,
                 },
@@ -56,8 +76,16 @@ export async function PATCH(
             )
         }
 
-        return NextResponse.json(data)
+        return NextResponse.json({
+            success: true,
+            id,
+            active: shouldActivate,
+            action,
+            details: data,
+        })
     } catch (error) {
+        console.error('Workflow PATCH error:', error)
+
         return NextResponse.json(
             {
                 error: 'Internal server error',
@@ -75,33 +103,22 @@ export async function DELETE(
     try {
         const { id } = await context.params
 
-        const baseUrl = process.env.N8N_BASE_URL
-        const apiKey = process.env.N8N_API_KEY
+        const config = getN8nConfig()
 
-        if (!baseUrl || !apiKey) {
-            return NextResponse.json(
-                { error: 'Missing N8N_BASE_URL or N8N_API_KEY' },
-                { status: 500 }
-            )
+        if ('error' in config) {
+            return config.error
         }
 
-        const response = await fetch(`${baseUrl}/workflows/${id}`, {
+        const response = await fetch(`${config.baseUrl}/workflows/${id}`, {
             method: 'DELETE',
             headers: {
-                'X-N8N-API-KEY': apiKey,
-                'Content-Type': 'application/json',
+                'X-N8N-API-KEY': config.apiKey,
+                Accept: 'application/json',
             },
+            cache: 'no-store',
         })
 
-        const text = await response.text()
-
-        let data: any = {}
-
-        try {
-            data = text ? JSON.parse(text) : {}
-        } catch {
-            data = { raw: text }
-        }
+        const data = await parseResponse(response)
 
         if (!response.ok) {
             return NextResponse.json(
@@ -120,6 +137,8 @@ export async function DELETE(
             details: data,
         })
     } catch (error) {
+        console.error('Workflow DELETE error:', error)
+
         return NextResponse.json(
             {
                 error: 'Internal server error',

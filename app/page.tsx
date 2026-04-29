@@ -7,28 +7,27 @@ import { useEffect, useMemo, useState } from 'react'
 const STATUS_OPTIONS = ['all', 'success', 'error', 'canceled', 'running', 'waiting']
 const INITIAL_LIMIT = 50
 
+const DATE_FILTER_OPTIONS = [
+  { value: 'all', label: 'All loaded' },
+  { value: 'today', label: 'Today' },
+  { value: 'last24h', label: 'Last 24 hours' },
+  { value: 'last7d', label: 'Last 7 days' },
+  { value: 'thisMonth', label: 'This month' },
+  { value: 'custom', label: 'Custom range' },
+]
+
 function StatCard({
   label,
   value,
   color,
-  darkMode,
 }: {
   label: string
   value: number | string
   color: string
-  darkMode: boolean
 }) {
   return (
-    <div
-      className={`rounded-xl p-5 shadow-sm border transition-colors ${darkMode
-        ? 'bg-gray-900 border-gray-800 shadow-black/20'
-        : 'bg-white border-gray-100'
-        }`}
-    >
-      <p
-        className={`text-xs font-medium uppercase tracking-wider mb-1 ${darkMode ? 'text-gray-500' : 'text-gray-400'
-          }`}
-      >
+    <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm transition-colors dark:border-gray-800 dark:bg-gray-900 dark:shadow-black/20">
+      <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
         {label}
       </p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
@@ -36,28 +35,22 @@ function StatCard({
   )
 }
 
-function DashboardSkeleton({ darkMode }: { darkMode: boolean }) {
+function DashboardSkeleton() {
   return (
-    <div className={`p-8 min-h-full ${darkMode ? 'bg-gray-950' : 'bg-gray-50'}`}>
+    <div className="min-h-full bg-gray-50 p-8 dark:bg-gray-950">
       <div className="mb-8">
-        <div
-          className={`h-8 w-56 rounded animate-pulse mb-2 ${darkMode ? 'bg-gray-800' : 'bg-gray-200'
-            }`}
-        />
-        <div
-          className={`h-4 w-72 rounded animate-pulse ${darkMode ? 'bg-gray-900' : 'bg-gray-100'
-            }`}
-        />
+        <div className="mb-2 h-8 w-56 animate-pulse rounded bg-gray-200 dark:bg-gray-800" />
+        <div className="h-4 w-72 animate-pulse rounded bg-gray-100 dark:bg-gray-900" />
       </div>
 
-      <div className="grid grid-cols-4 gap-4 mb-8">
-        <div className={`h-28 rounded-xl animate-pulse ${darkMode ? 'bg-gray-900' : 'bg-gray-100'}`} />
-        <div className={`h-28 rounded-xl animate-pulse ${darkMode ? 'bg-gray-900' : 'bg-gray-100'}`} />
-        <div className={`h-28 rounded-xl animate-pulse ${darkMode ? 'bg-gray-900' : 'bg-gray-100'}`} />
-        <div className={`h-28 rounded-xl animate-pulse ${darkMode ? 'bg-gray-900' : 'bg-gray-100'}`} />
+      <div className="mb-8 grid grid-cols-4 gap-4">
+        <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
+        <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
+        <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
+        <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
       </div>
 
-      <div className={`h-96 rounded-xl animate-pulse ${darkMode ? 'bg-gray-900' : 'bg-gray-100'}`} />
+      <div className="h-96 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
     </div>
   )
 }
@@ -94,6 +87,91 @@ function formatLastUpdated(date: Date | null) {
   })
 }
 
+function matchesDateFilter(
+  startedAt: string | null | undefined,
+  dateFilter: string,
+  customStartDate: string,
+  customEndDate: string
+) {
+  if (dateFilter === 'all') return true
+  if (!startedAt) return false
+
+  const startedDate = new Date(startedAt)
+
+  if (Number.isNaN(startedDate.getTime())) return false
+
+  const now = new Date()
+
+  if (dateFilter === 'today') {
+    return (
+      startedDate.getFullYear() === now.getFullYear() &&
+      startedDate.getMonth() === now.getMonth() &&
+      startedDate.getDate() === now.getDate()
+    )
+  }
+
+  if (dateFilter === 'last24h') {
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000
+    return startedDate.getTime() >= oneDayAgo
+  }
+
+  if (dateFilter === 'last7d') {
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
+    return startedDate.getTime() >= sevenDaysAgo
+  }
+
+  if (dateFilter === 'thisMonth') {
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
+    return startedDate >= startOfMonth && startedDate <= now
+  }
+
+  if (dateFilter === 'custom') {
+    if (!customStartDate && !customEndDate) return true
+
+    let startDate: Date | null = null
+    let endDate: Date | null = null
+
+    if (customStartDate) {
+      startDate = new Date(`${customStartDate}T00:00:00`)
+    }
+
+    if (customEndDate) {
+      endDate = new Date(`${customEndDate}T23:59:59.999`)
+    }
+
+    if (startDate && startedDate < startDate) return false
+    if (endDate && startedDate > endDate) return false
+
+    return true
+  }
+
+  return true
+}
+
+function getDateFilterLabel(
+  dateFilter: string,
+  customStartDate = '',
+  customEndDate = ''
+) {
+  if (dateFilter === 'custom') {
+    if (customStartDate && customEndDate) {
+      return `${customStartDate} to ${customEndDate}`
+    }
+
+    if (customStartDate) {
+      return `From ${customStartDate}`
+    }
+
+    if (customEndDate) {
+      return `Until ${customEndDate}`
+    }
+
+    return 'Custom range'
+  }
+
+  return DATE_FILTER_OPTIONS.find(option => option.value === dateFilter)?.label || 'All loaded'
+}
+
 async function fetchJson(url: string) {
   const res = await fetch(url)
 
@@ -107,31 +185,17 @@ async function fetchJson(url: string) {
 }
 
 export default function Home() {
-  const [darkMode, setDarkMode] = useState(false)
   const [statusFilter, setStatusFilter] = useState('all')
   const [workflowFilter, setWorkflowFilter] = useState('all')
+  const [dateFilter, setDateFilter] = useState('all')
+  const [customStartDate, setCustomStartDate] = useState('')
+  const [customEndDate, setCustomEndDate] = useState('')
   const [extraExecutions, setExtraExecutions] = useState<any[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
   const [loadingMore, setLoadingMore] = useState(false)
   const [manualError, setManualError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem('n8n-admin-theme')
-
-    if (savedTheme === 'dark') {
-      setDarkMode(true)
-    }
-
-    if (savedTheme === 'light') {
-      setDarkMode(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem('n8n-admin-theme', darkMode ? 'dark' : 'light')
-  }, [darkMode])
 
   const {
     data: execData,
@@ -193,11 +257,17 @@ export default function Home() {
     return map
   }, [workflowData])
 
+  const dateFilteredExecutions = useMemo(() => {
+    return executions.filter(ex =>
+      matchesDateFilter(ex.startedAt, dateFilter, customStartDate, customEndDate)
+    )
+  }, [executions, dateFilter, customStartDate, customEndDate])
+
   const scopedExecutions = useMemo(() => {
-    return executions.filter(
+    return dateFilteredExecutions.filter(
       ex => workflowFilter === 'all' || ex.workflowId === workflowFilter
     )
-  }, [executions, workflowFilter])
+  }, [dateFilteredExecutions, workflowFilter])
 
   const filtered = useMemo(() => {
     return scopedExecutions.filter(
@@ -229,8 +299,8 @@ export default function Home() {
       return {
         type: 'neutral',
         icon: 'ℹ️',
-        title: 'No executions loaded',
-        message: 'There are no loaded executions to summarize yet.',
+        title: 'No executions found',
+        message: 'No executions match the current filters.',
       }
     }
 
@@ -241,7 +311,7 @@ export default function Home() {
         type: 'critical',
         icon: '🚨',
         title: 'Critical attention needed',
-        message: `${totalErrors} errors detected in the latest ${total} loaded executions.`,
+        message: `${totalErrors} errors detected in the current filtered view.`,
       }
     }
 
@@ -250,7 +320,7 @@ export default function Home() {
         type: 'warning',
         icon: '⚠️',
         title: 'Needs attention',
-        message: `${totalErrors} error${totalErrors === 1 ? '' : 's'} detected in the latest ${total} loaded executions.`,
+        message: `${totalErrors} error${totalErrors === 1 ? '' : 's'} detected in the current filtered view.`,
       }
     }
 
@@ -267,25 +337,29 @@ export default function Home() {
       type: 'healthy',
       icon: '✅',
       title: 'Healthy',
-      message: `No errors detected in the latest ${total} loaded executions.`,
+      message: 'No errors detected in the current filtered view.',
     }
   }, [total, totalErrors, totalRunning])
 
   const healthBannerClasses = useMemo(() => {
-    if (darkMode) {
-      if (healthBanner.type === 'critical') return 'bg-red-950/60 border-red-900 text-red-100'
-      if (healthBanner.type === 'warning') return 'bg-amber-950/60 border-amber-900 text-amber-100'
-      if (healthBanner.type === 'active') return 'bg-blue-950/60 border-blue-900 text-blue-100'
-      if (healthBanner.type === 'healthy') return 'bg-emerald-950/60 border-emerald-900 text-emerald-100'
-      return 'bg-gray-900 border-gray-800 text-gray-100'
+    if (healthBanner.type === 'critical') {
+      return 'bg-red-50 border-red-100 text-red-800 dark:bg-red-950/60 dark:border-red-900 dark:text-red-100'
     }
 
-    if (healthBanner.type === 'critical') return 'bg-red-50 border-red-100 text-red-800'
-    if (healthBanner.type === 'warning') return 'bg-amber-50 border-amber-100 text-amber-800'
-    if (healthBanner.type === 'active') return 'bg-blue-50 border-blue-100 text-blue-800'
-    if (healthBanner.type === 'healthy') return 'bg-green-50 border-green-100 text-green-800'
-    return 'bg-gray-50 border-gray-100 text-gray-700'
-  }, [darkMode, healthBanner.type])
+    if (healthBanner.type === 'warning') {
+      return 'bg-amber-50 border-amber-100 text-amber-800 dark:bg-amber-950/60 dark:border-amber-900 dark:text-amber-100'
+    }
+
+    if (healthBanner.type === 'active') {
+      return 'bg-blue-50 border-blue-100 text-blue-800 dark:bg-blue-950/60 dark:border-blue-900 dark:text-blue-100'
+    }
+
+    if (healthBanner.type === 'healthy') {
+      return 'bg-green-50 border-green-100 text-green-800 dark:bg-emerald-950/60 dark:border-emerald-900 dark:text-emerald-100'
+    }
+
+    return 'bg-gray-50 border-gray-100 text-gray-700 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-100'
+  }, [healthBanner.type])
 
   const uniqueWorkflows = useMemo(() => {
     const ids = Array.from(
@@ -302,7 +376,7 @@ export default function Home() {
 
   const workflowBreakdown = useMemo(() => {
     return Object.entries(
-      executions.reduce((acc: any, ex) => {
+      dateFilteredExecutions.reduce((acc: any, ex) => {
         const name = workflowMap[ex.workflowId] || ex.workflowId || 'Unknown Workflow'
 
         if (!acc[name]) {
@@ -323,7 +397,7 @@ export default function Home() {
     )
       .sort((a: any, b: any) => b[1].total - a[1].total)
       .slice(0, 5)
-  }, [executions, workflowMap])
+  }, [dateFilteredExecutions, workflowMap])
 
   const maxTotal =
     workflowBreakdown.length > 0 ? (workflowBreakdown[0][1] as any).total : 1
@@ -385,28 +459,28 @@ export default function Home() {
     }
   }
 
+  const clearFilters = () => {
+    setWorkflowFilter('all')
+    setDateFilter('all')
+    setCustomStartDate('')
+    setCustomEndDate('')
+    setStatusFilter('all')
+  }
+
   const errorMessage = execError
     ? 'Failed to load executions. Please check your API route or n8n connection.'
     : manualError
 
   if (loadingExecutions && !execData) {
-    return <DashboardSkeleton darkMode={darkMode} />
+    return <DashboardSkeleton />
   }
 
   if (errorMessage && executions.length === 0) {
     return (
-      <div
-        className={`flex h-full items-center justify-center ${darkMode ? 'bg-gray-950' : 'bg-gray-50'
-          }`}
-      >
-        <div
-          className={`rounded-xl border shadow-sm p-6 max-w-md text-center ${darkMode
-            ? 'bg-gray-900 border-red-900'
-            : 'bg-white border-red-100'
-            }`}
-        >
-          <p className="text-red-600 font-semibold mb-2">Dashboard Error</p>
-          <p className={`text-sm ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+      <div className="flex h-full items-center justify-center bg-gray-50 dark:bg-gray-950">
+        <div className="max-w-md rounded-xl border border-red-100 bg-white p-6 text-center shadow-sm dark:border-red-900 dark:bg-gray-900">
+          <p className="mb-2 font-semibold text-red-600">Dashboard Error</p>
+          <p className="text-sm text-gray-500 dark:text-gray-400">
             {errorMessage}
           </p>
         </div>
@@ -415,61 +489,42 @@ export default function Home() {
   }
 
   return (
-    <div
-      className={`p-8 min-h-full transition-colors ${darkMode ? 'bg-gray-950 text-gray-100' : 'bg-gray-50 text-gray-900'
-        }`}
-    >
+    <div className="min-h-full bg-gray-50 p-8 text-gray-900 transition-colors dark:bg-gray-950 dark:text-gray-100">
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
-          <h2
-            className={`text-2xl font-bold ${darkMode ? 'text-white' : 'text-gray-900'
-              }`}
-          >
+          <h2 className="text-2xl font-bold text-gray-900 dark:text-white">
             {workflowFilter === 'all'
               ? 'All Executions'
               : workflowMap[workflowFilter] || workflowFilter}
           </h2>
 
-          <p className={`text-sm mt-1 ${darkMode ? 'text-gray-400' : 'text-gray-400'}`}>
+          <p className="mt-1 text-sm text-gray-400 dark:text-gray-400">
             Showing {filtered.length} of {executions.length} loaded executions
+            {dateFilter !== 'all' &&
+              ` · Date filter: ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
             {loadingWorkflows && ' · Loading workflow names...'}
             {' · '}
             Last updated {formatLastUpdated(lastUpdated)}
           </p>
 
           {errorMessage && (
-            <p className="text-sm text-red-500 mt-2">
+            <p className="mt-2 text-sm text-red-500">
               {errorMessage}
             </p>
           )}
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setDarkMode(prev => !prev)}
-            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors ${darkMode
-              ? 'bg-gray-900 border-gray-700 text-gray-200 hover:bg-gray-800'
-              : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900'
-              }`}
-          >
-            {darkMode ? '☀️ Light' : '🌙 Dark'}
-          </button>
-
-          <button
-            onClick={refreshDashboard}
-            disabled={refreshing}
-            className={`px-4 py-2 rounded-lg border text-sm font-medium transition-colors disabled:opacity-50 ${darkMode
-              ? 'bg-gray-900 border-gray-700 text-gray-200 hover:bg-gray-800'
-              : 'bg-white border-gray-200 text-gray-600 hover:border-gray-400 hover:text-gray-900'
-              }`}
-          >
-            {refreshing ? 'Refreshing...' : 'Refresh'}
-          </button>
-        </div>
+        <button
+          onClick={refreshDashboard}
+          disabled={refreshing}
+          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+        >
+          {refreshing ? 'Refreshing...' : 'Refresh'}
+        </button>
       </div>
 
       {/* Compact Health Banner */}
-      <div className={`mb-8 rounded-xl border px-5 py-4 flex items-center justify-between gap-4 ${healthBannerClasses}`}>
+      <div className={`mb-8 flex items-center justify-between gap-4 rounded-xl border px-5 py-4 ${healthBannerClasses}`}>
         <div className="flex items-center gap-3">
           <span className="text-xl">{healthBanner.icon}</span>
           <div>
@@ -481,10 +536,7 @@ export default function Home() {
         {totalErrors > 0 && (
           <button
             onClick={() => setStatusFilter('error')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors ${darkMode
-              ? 'border-white/10 bg-white/10 hover:bg-white/20'
-              : 'border-black/5 bg-white/70 hover:bg-white'
-              }`}
+            className="rounded-lg border border-black/5 bg-white/70 px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/20"
           >
             Show errors
           </button>
@@ -492,91 +544,66 @@ export default function Home() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-4 gap-4 mb-8">
+      <div className="mb-8 grid grid-cols-4 gap-4">
         <StatCard
           label="Total"
           value={total}
-          color={darkMode ? 'text-white' : 'text-gray-900'}
-          darkMode={darkMode}
+          color="text-gray-900 dark:text-white"
         />
         <StatCard
           label="Success"
           value={totalSuccess}
           color="text-green-500"
-          darkMode={darkMode}
         />
         <StatCard
           label="Errors"
           value={totalErrors}
           color="text-red-500"
-          darkMode={darkMode}
         />
         <StatCard
           label="Success Rate"
           value={successRate}
           color="text-blue-500"
-          darkMode={darkMode}
         />
       </div>
 
       {/* Workflow Breakdown */}
       {workflowFilter === 'all' && (
-        <div
-          className={`rounded-xl border shadow-sm p-5 mb-8 transition-colors ${darkMode
-            ? 'bg-gray-900 border-gray-800 shadow-black/20'
-            : 'bg-white border-gray-100'
-            }`}
-        >
-          <div
-            className={`mb-5 border-b pb-4 ${darkMode ? 'border-gray-800' : 'border-gray-100'
-              }`}
-          >
+        <div className="mb-8 rounded-xl border border-gray-100 bg-white p-5 shadow-sm transition-colors dark:border-gray-800 dark:bg-gray-900 dark:shadow-black/20">
+          <div className="mb-5 border-b border-gray-100 pb-4 dark:border-gray-800">
             <div className="flex items-center gap-3">
-              <h3
-                className={`text-xl font-bold tracking-tight ${darkMode ? 'text-white' : 'text-gray-900'
-                  }`}
-              >
+              <h3 className="text-xl font-bold tracking-tight text-gray-900 dark:text-white">
                 Workflow Breakdown
               </h3>
 
-              <span
-                className={`rounded-full px-2.5 py-1 text-xs font-semibold ${darkMode
-                    ? 'bg-gray-800 text-gray-300 border border-gray-700'
-                    : 'bg-gray-100 text-gray-600 border border-gray-200'
-                  }`}
-              >
+              <span className="rounded-full border border-gray-200 bg-gray-100 px-2.5 py-1 text-xs font-semibold text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
                 Top 5
               </span>
             </div>
 
-            <p
-              className={`mt-1 text-sm ${darkMode ? 'text-gray-500' : 'text-gray-400'
-                }`}
-            >
-              Top 5 most active workflows from the latest {executions.length} loaded executions.
+            <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
+              Top 5 most active workflows from the current loaded executions
+              {dateFilter !== 'all' &&
+                ` filtered by ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}.
             </p>
           </div>
 
           <div className="space-y-3">
             {workflowBreakdown.length === 0 ? (
-              <p className={`text-sm ${darkMode ? 'text-gray-600' : 'text-gray-300'}`}>
+              <p className="text-sm text-gray-300 dark:text-gray-600">
                 No workflow data available
               </p>
             ) : (
               workflowBreakdown.map(([name, stats]: any) => (
                 <div key={name} className="flex items-center gap-3">
                   <span
-                    className={`text-sm w-52 truncate ${darkMode ? 'text-gray-300' : 'text-gray-600'
-                      }`}
+                    className="w-52 truncate text-sm text-gray-600 dark:text-gray-300"
                     title={name}
                   >
                     {name}
                   </span>
 
-                  <div
-                    className={`flex-1 rounded-full h-2 overflow-hidden ${darkMode ? 'bg-gray-800' : 'bg-gray-100'
-                      }`}
-                  >
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
                     <div
                       className="h-2 rounded-full bg-green-400"
                       style={{
@@ -585,12 +612,12 @@ export default function Home() {
                     />
                   </div>
 
-                  <span className={`text-xs w-16 text-right ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                  <span className="w-16 text-right text-xs text-gray-400 dark:text-gray-500">
                     {stats.total} runs
                   </span>
 
                   {stats.error > 0 && (
-                    <span className="text-xs text-red-500 w-12">
+                    <span className="w-12 text-xs text-red-500">
                       {stats.error} err
                     </span>
                   )}
@@ -601,15 +628,12 @@ export default function Home() {
         </div>
       )}
 
-      {/* Workflow Filter */}
-      <div className="mb-4">
+      {/* Filters */}
+      <div className="mb-4 flex flex-wrap items-center gap-3">
         <select
           value={workflowFilter}
           onChange={e => setWorkflowFilter(e.target.value)}
-          className={`px-4 py-2 rounded-lg border text-sm focus:outline-none focus:ring-2 transition-colors ${darkMode
-            ? 'bg-gray-900 border-gray-700 text-gray-200 focus:ring-gray-700'
-            : 'bg-white border-gray-200 text-gray-700 focus:ring-gray-300'
-            }`}
+          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
         >
           <option value="all">All Workflows</option>
 
@@ -620,19 +644,52 @@ export default function Home() {
           ))}
         </select>
 
-        {workflowFilter !== 'all' && (
+        <select
+          value={dateFilter}
+          onChange={e => setDateFilter(e.target.value)}
+          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
+        >
+          {DATE_FILTER_OPTIONS.map(option => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+
+        {dateFilter === 'custom' && (
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="date"
+              value={customStartDate}
+              onChange={e => setCustomStartDate(e.target.value)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
+            />
+
+            <span className="text-sm text-gray-400 dark:text-gray-500">
+              to
+            </span>
+
+            <input
+              type="date"
+              value={customEndDate}
+              onChange={e => setCustomEndDate(e.target.value)}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
+            />
+          </div>
+        )}
+
+        {(workflowFilter !== 'all' || dateFilter !== 'all' || statusFilter !== 'all') && (
           <button
-            onClick={() => setWorkflowFilter('all')}
-            className={`ml-2 text-sm underline ${darkMode ? 'text-gray-500 hover:text-gray-300' : 'text-gray-400 hover:text-gray-700'
-              }`}
+            onClick={clearFilters}
+            className="text-sm text-gray-400 underline hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
           >
-            Clear
+            Clear filters
           </button>
         )}
       </div>
 
       {/* Status Filter */}
-      <div className="flex gap-2 flex-wrap mb-5">
+      <div className="mb-5 flex flex-wrap gap-2">
         {STATUS_OPTIONS.map(status => {
           const count =
             status === 'all'
@@ -643,13 +700,9 @@ export default function Home() {
             <button
               key={status}
               onClick={() => setStatusFilter(status)}
-              className={`px-4 py-1.5 rounded-full text-sm font-medium border transition-colors ${statusFilter === status
-                ? darkMode
-                  ? 'bg-white text-gray-950 border-white'
-                  : 'bg-gray-900 text-white border-gray-900'
-                : darkMode
-                  ? 'bg-gray-900 text-gray-300 border-gray-700 hover:border-gray-500'
-                  : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${statusFilter === status
+                  ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-950'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-gray-500'
                 }`}
             >
               {status === 'all'
@@ -662,51 +715,40 @@ export default function Home() {
       </div>
 
       {/* Table */}
-      <div
-        className={`rounded-xl border shadow-sm overflow-hidden transition-colors ${darkMode
-          ? 'bg-gray-900 border-gray-800 shadow-black/20'
-          : 'bg-white border-gray-100'
-          }`}
-      >
+      <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm transition-colors dark:border-gray-800 dark:bg-gray-900 dark:shadow-black/20">
         <table className="w-full text-sm">
           <thead>
-            <tr
-              className={`border-b ${darkMode
-                ? 'bg-gray-800/60 border-gray-800'
-                : 'bg-gray-50 border-gray-100'
-                }`}
-            >
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+            <tr className="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-800/60">
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 ID
               </th>
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 Workflow
               </th>
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 Status
               </th>
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 Mode
               </th>
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 Duration
               </th>
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 Started At
               </th>
-              <th className={`p-4 text-left text-xs font-semibold uppercase tracking-wider ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+              <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                 Action
               </th>
             </tr>
           </thead>
 
-          <tbody className={darkMode ? 'divide-y divide-gray-800' : 'divide-y divide-gray-50'}>
+          <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
             {filtered.length === 0 ? (
               <tr>
                 <td
                   colSpan={7}
-                  className={`p-8 text-center ${darkMode ? 'text-gray-600' : 'text-gray-300'
-                    }`}
+                  className="p-8 text-center text-gray-300 dark:text-gray-600"
                 >
                   No executions found
                 </td>
@@ -721,61 +763,46 @@ export default function Home() {
                   <tr
                     key={`${ex.id}-${index}`}
                     className={`transition-colors ${ex.status === 'error'
-                      ? darkMode
-                        ? 'bg-red-950/30 hover:bg-red-950/50'
-                        : 'bg-red-50 hover:bg-red-100'
-                      : darkMode
-                        ? 'hover:bg-gray-800/60'
-                        : 'hover:bg-gray-50'
+                        ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50'
+                        : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
                       }`}
                   >
-                    <td className={`p-4 font-mono text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                    <td className="p-4 font-mono text-xs text-gray-400 dark:text-gray-500">
                       {ex.id}
                     </td>
 
                     <td className="p-4">
-                      <span
-                        className={`font-medium ${darkMode ? 'text-gray-200' : 'text-gray-700'
-                          }`}
-                      >
+                      <span className="font-medium text-gray-700 dark:text-gray-200">
                         {workflowName}
                       </span>
                     </td>
 
                     <td className="p-4">
                       <span
-                        className={`px-2.5 py-1 rounded-full text-xs font-semibold ${ex.status === 'success'
-                          ? darkMode
-                            ? 'bg-green-950 text-green-300'
-                            : 'bg-green-100 text-green-700'
-                          : ex.status === 'error'
-                            ? darkMode
-                              ? 'bg-red-950 text-red-300'
-                              : 'bg-red-100 text-red-700'
-                            : ex.status === 'running'
-                              ? darkMode
-                                ? 'bg-blue-950 text-blue-300'
-                                : 'bg-blue-100 text-blue-700'
-                              : darkMode
-                                ? 'bg-yellow-950 text-yellow-300'
-                                : 'bg-yellow-100 text-yellow-700'
+                        className={`rounded-full px-2.5 py-1 text-xs font-semibold ${ex.status === 'success'
+                            ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'
+                            : ex.status === 'error'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
+                              : ex.status === 'running'
+                                ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
+                                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300'
                           }`}
                       >
                         {ex.status || 'unknown'}
                       </span>
                     </td>
 
-                    <td className={`p-4 capitalize ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <td className="p-4 capitalize text-gray-500 dark:text-gray-400">
                       {ex.mode || '—'}
                     </td>
 
-                    <td className={`p-4 font-mono text-xs ${darkMode ? 'text-gray-400' : 'text-gray-500'}`}>
+                    <td className="p-4 font-mono text-xs text-gray-500 dark:text-gray-400">
                       {ex.startedAt && ex.stoppedAt
                         ? duration(ex.startedAt, ex.stoppedAt)
                         : '—'}
                     </td>
 
-                    <td className={`p-4 text-xs ${darkMode ? 'text-gray-500' : 'text-gray-400'}`}>
+                    <td className="p-4 text-xs text-gray-400 dark:text-gray-500">
                       {ex.startedAt
                         ? new Date(ex.startedAt).toLocaleString()
                         : '—'}
@@ -787,16 +814,13 @@ export default function Home() {
                           href={executionUrl}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className={`inline-flex items-center rounded-lg px-3 py-1.5 text-xs font-semibold border transition-colors ${darkMode
-                            ? 'border-gray-700 text-gray-200 hover:bg-gray-800'
-                            : 'border-gray-200 text-gray-700 hover:bg-gray-50 hover:border-gray-300'
-                            }`}
+                          className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                           title="Open execution in n8n"
                         >
                           Open ↗
                         </a>
                       ) : (
-                        <span className={`text-xs ${darkMode ? 'text-gray-600' : 'text-gray-300'}`}>
+                        <span className="text-xs text-gray-300 dark:text-gray-600">
                           —
                         </span>
                       )}
@@ -814,10 +838,7 @@ export default function Home() {
           <button
             onClick={loadMore}
             disabled={loadingMore}
-            className={`px-6 py-2.5 rounded-lg text-sm font-medium disabled:opacity-50 transition-colors ${darkMode
-              ? 'bg-white text-gray-950 hover:bg-gray-200'
-              : 'bg-gray-900 text-white hover:bg-gray-700'
-              }`}
+            className="rounded-lg bg-gray-900 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-50 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200"
           >
             {loadingMore ? 'Loading...' : 'Load More'}
           </button>
@@ -825,7 +846,7 @@ export default function Home() {
       )}
 
       {!nextCursor && executions.length > 0 && (
-        <p className={`mt-6 text-center text-sm ${darkMode ? 'text-gray-600' : 'text-gray-300'}`}>
+        <p className="mt-6 text-center text-sm text-gray-300 dark:text-gray-600">
           All {executions.length} executions loaded
         </p>
       )}
