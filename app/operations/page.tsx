@@ -1,7 +1,7 @@
 // app/operations/page.tsx
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 
 type OperationsSummary = {
     totalExecutions: number
@@ -50,7 +50,133 @@ type ImpactFilter =
     | 'low_success_rate'
     | 'needs_attention'
 
+type DateRangePreset =
+    | 'all_time'
+    | 'today'
+    | 'last_7_days'
+    | 'this_month'
+    | 'last_month'
+    | 'custom'
+
+const OPERATIONS_START_DATE = '2026-04-28'
+
+function getStartOfDay(date: Date) {
+    const copy = new Date(date)
+    copy.setHours(0, 0, 0, 0)
+    return copy
+}
+
+function getEndOfDay(date: Date) {
+    const copy = new Date(date)
+    copy.setHours(23, 59, 59, 999)
+    return copy
+}
+
+function getOperationsStartDate() {
+    return getStartOfDay(new Date(`${OPERATIONS_START_DATE}T00:00:00`))
+}
+
+function clampToOperationsStart(date: Date) {
+    const operationsStart = getOperationsStartDate()
+    return date < operationsStart ? operationsStart : date
+}
+
+function formatDateInput(date: Date) {
+    const year = date.getFullYear()
+    const month = String(date.getMonth() + 1).padStart(2, '0')
+    const day = String(date.getDate()).padStart(2, '0')
+
+    return `${year}-${month}-${day}`
+}
+
+function getDateRange({
+    preset,
+    customStartDate,
+    customEndDate,
+}: {
+    preset: DateRangePreset
+    customStartDate: string
+    customEndDate: string
+}) {
+    const now = new Date()
+    const todayStart = getStartOfDay(now)
+    const todayEnd = getEndOfDay(now)
+
+    if (preset === 'today') {
+        return {
+            startDate: clampToOperationsStart(todayStart),
+            endDate: todayEnd,
+            label: 'Today',
+        }
+    }
+
+    if (preset === 'last_7_days') {
+        const start = getStartOfDay(new Date())
+        start.setDate(start.getDate() - 6)
+
+        return {
+            startDate: clampToOperationsStart(start),
+            endDate: todayEnd,
+            label: 'Last 7 Days',
+        }
+    }
+
+    if (preset === 'this_month') {
+        const start = getStartOfDay(
+            new Date(now.getFullYear(), now.getMonth(), 1)
+        )
+
+        return {
+            startDate: clampToOperationsStart(start),
+            endDate: todayEnd,
+            label: 'This Month',
+        }
+    }
+
+    if (preset === 'last_month') {
+        const start = getStartOfDay(
+            new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        )
+
+        const end = getEndOfDay(
+            new Date(now.getFullYear(), now.getMonth(), 0)
+        )
+
+        return {
+            startDate: clampToOperationsStart(start),
+            endDate: end,
+            label: 'Last Month',
+        }
+    }
+
+    if (preset === 'custom') {
+        const start = clampToOperationsStart(
+            getStartOfDay(new Date(`${customStartDate}T00:00:00`))
+        )
+
+        let end = getEndOfDay(new Date(`${customEndDate}T00:00:00`))
+
+        if (end < start) {
+            end = getEndOfDay(start)
+        }
+
+        return {
+            startDate: start,
+            endDate: end,
+            label: 'Custom Range',
+        }
+    }
+
+    return {
+        startDate: getOperationsStartDate(),
+        endDate: todayEnd,
+        label: 'All Time',
+    }
+}
+
 export default function OperationsPage() {
+    const todayInput = formatDateInput(new Date())
+
     const [summary, setSummary] = useState<OperationsSummary | null>(null)
     const [workflows, setWorkflows] = useState<WorkflowMetric[]>([])
     const [loading, setLoading] = useState(true)
@@ -60,6 +186,32 @@ export default function OperationsPage() {
     const [sortBy, setSortBy] = useState<SortOption>('time_saved_desc')
     const [impactFilter, setImpactFilter] = useState<ImpactFilter>('all')
     const [visibleLimit, setVisibleLimit] = useState(15)
+
+    const [dateRangePreset, setDateRangePreset] =
+        useState<DateRangePreset>('all_time')
+
+    const [customStartDate, setCustomStartDate] =
+        useState(OPERATIONS_START_DATE)
+
+    const [customEndDate, setCustomEndDate] = useState(todayInput)
+
+    const selectedDateRange = useMemo(() => {
+        return getDateRange({
+            preset: dateRangePreset,
+            customStartDate,
+            customEndDate,
+        })
+    }, [dateRangePreset, customStartDate, customEndDate])
+
+    const displayedStartDate =
+        dateRangePreset === 'custom'
+            ? customStartDate
+            : formatDateInput(selectedDateRange.startDate)
+
+    const displayedEndDate =
+        dateRangePreset === 'custom'
+            ? customEndDate
+            : formatDateInput(selectedDateRange.endDate)
 
     function applyCardFilter({
         filter,
@@ -79,14 +231,19 @@ export default function OperationsPage() {
         }
     }
 
-    async function loadOperationsData() {
+    const loadOperationsData = useCallback(async () => {
         try {
             setLoading(true)
             setError(null)
 
+            const params = new URLSearchParams({
+                startDate: selectedDateRange.startDate.toISOString(),
+                endDate: selectedDateRange.endDate.toISOString(),
+            })
+
             const [summaryResponse, workflowsResponse] = await Promise.all([
-                fetch('/api/operations/summary'),
-                fetch('/api/operations/workflows'),
+                fetch(`/api/operations/summary?${params.toString()}`),
+                fetch(`/api/operations/workflows?${params.toString()}`),
             ])
 
             if (!summaryResponse.ok) {
@@ -107,11 +264,11 @@ export default function OperationsPage() {
         } finally {
             setLoading(false)
         }
-    }
+    }, [selectedDateRange])
 
     useEffect(() => {
         loadOperationsData()
-    }, [])
+    }, [loadOperationsData])
 
     const topWorkflow = useMemo(() => {
         if (workflows.length === 0) return null
@@ -228,7 +385,7 @@ export default function OperationsPage() {
         <main className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 p-8">
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-8">
                 <div>
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 dark:bg-orange-950/50 border-orange-100 dark:border-orange-900 text-orange-700 dark:text-orange-300 text-xs font-medium mb-3">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-orange-50 dark:bg-orange-950/50 border border-orange-100 dark:border-orange-900 text-orange-700 dark:text-orange-300 text-xs font-medium mb-3">
                         📊 Automation ROI
                     </div>
 
@@ -249,6 +406,69 @@ export default function OperationsPage() {
                     Refresh
                 </button>
             </div>
+
+            <section className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 mb-6 shadow-sm">
+                <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
+                    <div>
+                        <p className="text-sm font-semibold">Date Range</p>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Data is available starting April 28, 2026.
+                        </p>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-4 gap-3 w-full xl:w-auto">
+                        <select
+                            value={dateRangePreset}
+                            onChange={event => {
+                                setDateRangePreset(
+                                    event.target.value as DateRangePreset
+                                )
+                                setVisibleLimit(15)
+                            }}
+                            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-[#F07D19]"
+                        >
+                            <option value="all_time">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="last_7_days">Last 7 Days</option>
+                            <option value="this_month">This Month</option>
+                            <option value="last_month">Last Month</option>
+                            <option value="custom">Custom Range</option>
+                        </select>
+
+                        <input
+                            type="date"
+                            value={displayedStartDate}
+                            min={OPERATIONS_START_DATE}
+                            max={todayInput}
+                            disabled={dateRangePreset !== 'custom'}
+                            onChange={event => {
+                                setCustomStartDate(event.target.value)
+                                setVisibleLimit(15)
+                            }}
+                            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-[#F07D19] disabled:opacity-50"
+                        />
+
+                        <input
+                            type="date"
+                            value={displayedEndDate}
+                            min={OPERATIONS_START_DATE}
+                            max={todayInput}
+                            disabled={dateRangePreset !== 'custom'}
+                            onChange={event => {
+                                setCustomEndDate(event.target.value)
+                                setVisibleLimit(15)
+                            }}
+                            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-[#F07D19] disabled:opacity-50"
+                        />
+
+                        <div className="px-3 py-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 text-sm border border-orange-100 dark:border-orange-900">
+                            {selectedDateRange.label}:{' '}
+                            {formatDate(selectedDateRange.startDate.toISOString())}{' '}
+                            – {formatDate(selectedDateRange.endDate.toISOString())}
+                        </div>
+                    </div>
+                </div>
+            </section>
 
             {loading && (
                 <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-6">
@@ -274,14 +494,15 @@ export default function OperationsPage() {
                                 })
                             }
                             className={`xl:col-span-2 text-left rounded-2xl bg-gradient-to-br from-[#F6A04D] via-[#F07D19] to-[#C85E0B] text-white p-6 shadow-sm overflow-hidden relative transition-transform hover:-translate-y-0.5 hover:shadow-lg ${impactFilter === 'with_time_saved'
-                                ? 'ring-2 ring-orange-300'
+                                ? 'ring-2 ring-[#F07D19]'
                                 : ''
                                 }`}
                         >
                             <div className="absolute right-6 top-6 h-20 w-20 rounded-3xl bg-white/20 border border-white/20 flex items-center justify-center text-5xl shadow-sm">
                                 ⏱️
                             </div>
-                            <p className="text-sm text-indigo-100 font-medium">
+
+                            <p className="text-sm text-orange-50 font-medium">
                                 Total Estimated Time Saved
                             </p>
 
@@ -290,7 +511,7 @@ export default function OperationsPage() {
                                     {summary.totalHoursSaved.toFixed(1)} hrs
                                 </h2>
 
-                                <p className="text-indigo-100 mb-1">
+                                <p className="text-orange-50 mb-1">
                                     or {summary.totalTimeSavedMinutes.toFixed(0)} minutes
                                 </p>
                             </div>
@@ -506,7 +727,7 @@ export default function OperationsPage() {
                                     onChange={event =>
                                         setSortBy(event.target.value as SortOption)
                                     }
-                                    className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-indigo-400"
+                                    className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-950 text-sm outline-none focus:ring-2 focus:ring-[#F07D19]"
                                 >
                                     <option value="time_saved_desc">
                                         Sort: Time saved, highest first
@@ -583,7 +804,7 @@ export default function OperationsPage() {
                                                 colSpan={7}
                                                 className="px-5 py-8 text-center text-gray-500 dark:text-gray-400"
                                             >
-                                                No workflow metrics found.
+                                                No workflow metrics found for this date range.
                                             </td>
                                         </tr>
                                     )}
@@ -753,7 +974,7 @@ function MetricCard({
 
     const className = `w-full text-left bg-white dark:bg-gray-900 border rounded-2xl p-5 shadow-sm transition-all ${onClick ? 'hover:-translate-y-0.5 hover:shadow-lg cursor-pointer' : ''
         } ${isActive
-            ? 'border-[#F07D19] ring-2 ring-[#F07D19]/30 dark:ring-[#F07D19]/30'
+            ? 'border-[#F07D19] ring-2 ring-[#F07D19]/30'
             : 'border-gray-200 dark:border-gray-800'
         }`
 
@@ -779,9 +1000,9 @@ function HeroMiniStat({
 }) {
     return (
         <div className="rounded-xl bg-white/10 border border-white/10 p-4">
-            <p className="text-xs text-indigo-100">{label}</p>
+            <p className="text-xs text-orange-50">{label}</p>
             <p className="text-xl font-semibold mt-1">{value}</p>
-            <p className="text-xs text-indigo-100 mt-1">{helper}</p>
+            <p className="text-xs text-orange-50 mt-1">{helper}</p>
         </div>
     )
 }
