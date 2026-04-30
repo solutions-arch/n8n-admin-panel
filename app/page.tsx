@@ -4,7 +4,7 @@
 import useSWR from 'swr'
 import { useEffect, useMemo, useState } from 'react'
 
-const STATUS_OPTIONS = ['all', 'success', 'error', 'canceled', 'running', 'waiting']
+const STATUS_OPTIONS = ['all', 'success', 'error', 'canceled', 'waiting']
 const INITIAL_LIMIT = 50
 
 const DATE_FILTER_OPTIONS = [
@@ -43,7 +43,8 @@ function DashboardSkeleton() {
         <div className="h-4 w-72 animate-pulse rounded bg-gray-100 dark:bg-gray-900" />
       </div>
 
-      <div className="mb-8 grid grid-cols-4 gap-4">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
         <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
         <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
         <div className="h-28 animate-pulse rounded-xl bg-gray-100 dark:bg-gray-900" />
@@ -85,6 +86,11 @@ function formatLastUpdated(date: Date | null) {
     minute: '2-digit',
     second: '2-digit',
   })
+}
+
+function formatModeLabel(mode: string) {
+  if (!mode) return 'Unknown'
+  return mode.charAt(0).toUpperCase() + mode.slice(1)
 }
 
 function matchesDateFilter(
@@ -187,6 +193,7 @@ async function fetchJson(url: string) {
 export default function Home() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [workflowFilter, setWorkflowFilter] = useState('all')
+  const [modeFilter, setModeFilter] = useState('all')
   const [dateFilter, setDateFilter] = useState('all')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
@@ -263,33 +270,41 @@ export default function Home() {
     )
   }, [executions, dateFilter, customStartDate, customEndDate])
 
-  const scopedExecutions = useMemo(() => {
+  const workflowScopedExecutions = useMemo(() => {
     return dateFilteredExecutions.filter(
       ex => workflowFilter === 'all' || ex.workflowId === workflowFilter
     )
   }, [dateFilteredExecutions, workflowFilter])
 
+  const modeScopedExecutions = useMemo(() => {
+    return workflowScopedExecutions.filter(
+      ex => modeFilter === 'all' || ex.mode === modeFilter
+    )
+  }, [workflowScopedExecutions, modeFilter])
+
   const filtered = useMemo(() => {
-    return scopedExecutions.filter(
+    return modeScopedExecutions.filter(
       ex => statusFilter === 'all' || ex.status === statusFilter
     )
-  }, [scopedExecutions, statusFilter])
+  }, [modeScopedExecutions, statusFilter])
 
-  const total = scopedExecutions.length
+  const total = modeScopedExecutions.length
 
   const totalSuccess = useMemo(() => {
-    return scopedExecutions.filter(ex => ex.status === 'success').length
-  }, [scopedExecutions])
+    return modeScopedExecutions.filter(ex => ex.status === 'success').length
+  }, [modeScopedExecutions])
 
   const totalErrors = useMemo(() => {
-    return scopedExecutions.filter(ex => ex.status === 'error').length
-  }, [scopedExecutions])
+    return modeScopedExecutions.filter(ex => ex.status === 'error').length
+  }, [modeScopedExecutions])
 
-  const totalRunning = useMemo(() => {
-    return scopedExecutions.filter(
-      ex => ex.status === 'running' || ex.status === 'waiting'
-    ).length
-  }, [scopedExecutions])
+  const totalCanceled = useMemo(() => {
+    return modeScopedExecutions.filter(ex => ex.status === 'canceled').length
+  }, [modeScopedExecutions])
+
+  const totalWaiting = useMemo(() => {
+    return modeScopedExecutions.filter(ex => ex.status === 'waiting').length
+  }, [modeScopedExecutions])
 
   const successRate =
     total > 0 ? `${Math.round((totalSuccess / total) * 100)}%` : '—'
@@ -324,12 +339,12 @@ export default function Home() {
       }
     }
 
-    if (totalRunning > 0) {
+    if (totalWaiting > 0) {
       return {
         type: 'active',
-        icon: '🔄',
-        title: 'Active executions',
-        message: `${totalRunning} execution${totalRunning === 1 ? ' is' : 's are'} currently running or waiting.`,
+        icon: '⏳',
+        title: 'Waiting executions',
+        message: `${totalWaiting} execution${totalWaiting === 1 ? ' is' : 's are'} currently waiting.`,
       }
     }
 
@@ -339,7 +354,7 @@ export default function Home() {
       title: 'Healthy',
       message: 'No errors detected in the current filtered view.',
     }
-  }, [total, totalErrors, totalRunning])
+  }, [total, totalErrors, totalWaiting])
 
   const healthBannerClasses = useMemo(() => {
     if (healthBanner.type === 'critical') {
@@ -374,15 +389,30 @@ export default function Home() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [executions, workflowMap])
 
+  const modeOptions = useMemo(() => {
+    const modes = Array.from(
+      new Set(executions.map(ex => ex.mode).filter(Boolean))
+    ) as string[]
+
+    return modes.sort((a, b) => a.localeCompare(b))
+  }, [executions])
+
+  const workflowBreakdownSource = useMemo(() => {
+    return dateFilteredExecutions.filter(
+      ex => modeFilter === 'all' || ex.mode === modeFilter
+    )
+  }, [dateFilteredExecutions, modeFilter])
+
   const workflowBreakdown = useMemo(() => {
     return Object.entries(
-      dateFilteredExecutions.reduce((acc: any, ex) => {
+      workflowBreakdownSource.reduce((acc: any, ex) => {
         const name = workflowMap[ex.workflowId] || ex.workflowId || 'Unknown Workflow'
 
         if (!acc[name]) {
           acc[name] = {
             success: 0,
             error: 0,
+            waiting: 0,
             total: 0,
           }
         }
@@ -391,13 +421,14 @@ export default function Home() {
 
         if (ex.status === 'success') acc[name].success++
         if (ex.status === 'error') acc[name].error++
+        if (ex.status === 'waiting') acc[name].waiting++
 
         return acc
       }, {})
     )
       .sort((a: any, b: any) => b[1].total - a[1].total)
       .slice(0, 5)
-  }, [dateFilteredExecutions, workflowMap])
+  }, [workflowBreakdownSource, workflowMap])
 
   const maxTotal =
     workflowBreakdown.length > 0 ? (workflowBreakdown[0][1] as any).total : 1
@@ -461,6 +492,7 @@ export default function Home() {
 
   const clearFilters = () => {
     setWorkflowFilter('all')
+    setModeFilter('all')
     setDateFilter('all')
     setCustomStartDate('')
     setCustomEndDate('')
@@ -502,6 +534,8 @@ export default function Home() {
             Showing {filtered.length} of {executions.length} loaded executions
             {dateFilter !== 'all' &&
               ` · Date filter: ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
+            {modeFilter !== 'all' &&
+              ` · Mode: ${formatModeLabel(modeFilter)}`}
             {loadingWorkflows && ' · Loading workflow names...'}
             {' · '}
             Last updated {formatLastUpdated(lastUpdated)}
@@ -533,18 +567,29 @@ export default function Home() {
           </div>
         </div>
 
-        {totalErrors > 0 && (
-          <button
-            onClick={() => setStatusFilter('error')}
-            className="rounded-lg border border-black/5 bg-white/70 px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/20"
-          >
-            Show errors
-          </button>
-        )}
+        <div className="flex gap-2">
+          {totalErrors > 0 && (
+            <button
+              onClick={() => setStatusFilter('error')}
+              className="rounded-lg border border-black/5 bg-white/70 px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/20"
+            >
+              Show errors
+            </button>
+          )}
+
+          {totalWaiting > 0 && (
+            <button
+              onClick={() => setStatusFilter('waiting')}
+              className="rounded-lg border border-black/5 bg-white/70 px-3 py-1.5 text-xs font-semibold transition-colors hover:bg-white dark:border-white/10 dark:bg-white/10 dark:hover:bg-white/20"
+            >
+              Show waiting
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Stats */}
-      <div className="mb-8 grid grid-cols-4 gap-4">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label="Total"
           value={total}
@@ -559,6 +604,11 @@ export default function Home() {
           label="Errors"
           value={totalErrors}
           color="text-red-500"
+        />
+        <StatCard
+          label="Waiting"
+          value={totalWaiting}
+          color="text-blue-500"
         />
         <StatCard
           label="Success Rate"
@@ -584,7 +634,10 @@ export default function Home() {
             <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
               Top 5 most active workflows from the current loaded executions
               {dateFilter !== 'all' &&
-                ` filtered by ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}.
+                ` filtered by ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
+              {modeFilter !== 'all' &&
+                ` · Mode: ${formatModeLabel(modeFilter)}`}
+              .
             </p>
           </div>
 
@@ -619,6 +672,12 @@ export default function Home() {
                   {stats.error > 0 && (
                     <span className="w-12 text-xs text-red-500">
                       {stats.error} err
+                    </span>
+                  )}
+
+                  {stats.waiting > 0 && (
+                    <span className="w-16 text-xs text-blue-500">
+                      {stats.waiting} waiting
                     </span>
                   )}
                 </div>
@@ -656,6 +715,20 @@ export default function Home() {
           ))}
         </select>
 
+        <select
+          value={modeFilter}
+          onChange={e => setModeFilter(e.target.value)}
+          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
+        >
+          <option value="all">All Modes</option>
+
+          {modeOptions.map(mode => (
+            <option key={mode} value={mode}>
+              {formatModeLabel(mode)}
+            </option>
+          ))}
+        </select>
+
         {dateFilter === 'custom' && (
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -678,14 +751,17 @@ export default function Home() {
           </div>
         )}
 
-        {(workflowFilter !== 'all' || dateFilter !== 'all' || statusFilter !== 'all') && (
-          <button
-            onClick={clearFilters}
-            className="text-sm text-gray-400 underline hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
-          >
-            Clear filters
-          </button>
-        )}
+        {(workflowFilter !== 'all' ||
+          dateFilter !== 'all' ||
+          modeFilter !== 'all' ||
+          statusFilter !== 'all') && (
+            <button
+              onClick={clearFilters}
+              className="text-sm text-gray-400 underline hover:text-gray-700 dark:text-gray-500 dark:hover:text-gray-300"
+            >
+              Clear filters
+            </button>
+          )}
       </div>
 
       {/* Status Filter */}
@@ -694,7 +770,7 @@ export default function Home() {
           const count =
             status === 'all'
               ? total
-              : scopedExecutions.filter(ex => ex.status === status).length
+              : modeScopedExecutions.filter(ex => ex.status === status).length
 
           return (
             <button
@@ -764,7 +840,9 @@ export default function Home() {
                     key={`${ex.id}-${index}`}
                     className={`transition-colors ${ex.status === 'error'
                         ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50'
-                        : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
+                        : ex.status === 'waiting'
+                          ? 'bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/20 dark:hover:bg-blue-950/40'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-800/60'
                       }`}
                   >
                     <td className="p-4 font-mono text-xs text-gray-400 dark:text-gray-500">
@@ -783,9 +861,11 @@ export default function Home() {
                             ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300'
                             : ex.status === 'error'
                               ? 'bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300'
-                              : ex.status === 'running'
+                              : ex.status === 'waiting'
                                 ? 'bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300'
-                                : 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300'
+                                : ex.status === 'canceled'
+                                  ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-300'
+                                  : 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300'
                           }`}
                       >
                         {ex.status || 'unknown'}
