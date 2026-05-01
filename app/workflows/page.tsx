@@ -679,76 +679,83 @@ export default function WorkflowsPage() {
                                             </td>
 
                                             <td className="p-4">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    {workflowUrl && (
-                                                        <a
-                                                            href={workflowUrl}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-                                                        >
-                                                            Open ↗
-                                                        </a>
-                                                    )}
-
-                                                    <button
-                                                        onClick={() => loadVersionDetails(workflow)}
-                                                        disabled={versionLoadingId === workflow.id}
-                                                        className="inline-flex items-center rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
-                                                    >
-                                                        {versionLoadingId === workflow.id
-                                                            ? 'Loading...'
-                                                            : isExpanded
-                                                                ? 'Hide Details'
-                                                                : 'View Details'}
-                                                    </button>
-
-                                                    <button
-                                                        onClick={() =>
-                                                            toggleWorkflow(workflow.id, workflow.active)
-                                                        }
-                                                        disabled={actionLoading === workflow.id}
-                                                        className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${workflow.active
-                                                            ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-300 dark:hover:bg-yellow-900/60'
-                                                            : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
-                                                            }`}
-                                                    >
-                                                        {actionLoading === workflow.id
-                                                            ? '...'
-                                                            : workflow.active
-                                                                ? 'Deactivate'
-                                                                : 'Activate'}
-                                                    </button>
-
-                                                    {confirmDelete === workflow.id ? (
-                                                        <div className="flex flex-wrap items-center gap-1">
-                                                            <span className="text-xs text-gray-500 dark:text-gray-400">
-                                                                Sure?
-                                                            </span>
-
-                                                            <button
-                                                                onClick={() => deleteWorkflow(workflow.id)}
-                                                                disabled={actionLoading === workflow.id}
-                                                                className="rounded-lg bg-red-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                                                <div className="flex min-w-[230px] flex-col gap-2">
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        {workflowUrl && (
+                                                            <a
+                                                                href={workflowUrl}
+                                                                target="_blank"
+                                                                rel="noopener noreferrer"
+                                                                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
                                                             >
-                                                                Yes
-                                                            </button>
+                                                                Open ↗
+                                                            </a>
+                                                        )}
 
-                                                            <button
-                                                                onClick={() => setConfirmDelete(null)}
-                                                                className="rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-200 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
-                                                            >
-                                                                Cancel
-                                                            </button>
-                                                        </div>
-                                                    ) : (
                                                         <button
-                                                            onClick={() => setConfirmDelete(workflow.id)}
-                                                            className="rounded-lg bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                                            onClick={() => loadVersionDetails(workflow)}
+                                                            disabled={versionLoadingId === workflow.id}
+                                                            className={`inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${isExpanded
+                                                                    ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60'
+                                                                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
+                                                                }`}
                                                         >
-                                                            Delete
+                                                            {versionLoadingId === workflow.id
+                                                                ? 'Loading...'
+                                                                : isExpanded
+                                                                    ? 'Hide Details'
+                                                                    : 'View Details'}
                                                         </button>
-                                                    )}
+                                                    </div>
+
+                                                    <div className="flex flex-wrap items-center gap-2">
+                                                        <button
+                                                            onClick={() =>
+                                                                toggleWorkflow(workflow.id, workflow.active)
+                                                            }
+                                                            disabled={actionLoading === workflow.id}
+                                                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${workflow.active
+                                                                    ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-300 dark:hover:bg-yellow-900/60'
+                                                                    : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
+                                                                }`}
+                                                        >
+                                                            {actionLoading === workflow.id
+                                                                ? '...'
+                                                                : workflow.active
+                                                                    ? 'Deactivate'
+                                                                    : 'Activate'}
+                                                        </button>
+
+                                                        {confirmDelete === workflow.id ? (
+                                                            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 dark:border-red-900 dark:bg-red-950/30">
+                                                                <span className="text-xs text-red-600 dark:text-red-300">
+                                                                    Delete?
+                                                                </span>
+
+                                                                <button
+                                                                    onClick={() => deleteWorkflow(workflow.id)}
+                                                                    disabled={actionLoading === workflow.id}
+                                                                    className="rounded-md bg-red-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                                                                >
+                                                                    Yes
+                                                                </button>
+
+                                                                <button
+                                                                    onClick={() => setConfirmDelete(null)}
+                                                                    className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                                                                >
+                                                                    Cancel
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <button
+                                                                onClick={() => setConfirmDelete(workflow.id)}
+                                                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                                            >
+                                                                Delete
+                                                            </button>
+                                                        )}
+                                                    </div>
                                                 </div>
                                             </td>
                                         </tr>
