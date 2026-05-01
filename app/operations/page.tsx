@@ -14,7 +14,9 @@ type OperationsSummary = {
     totalHoursSaved: number
     totalWorkdaysSaved: number
     avgTimeSavedPerSuccessfulExecution: number
+    avgTimeSavedPerTimeSavingExecution?: number
     totalDurationSeconds: number
+    timeSavingExecutions?: number
 }
 
 type WorkflowMetric = {
@@ -23,10 +25,12 @@ type WorkflowMetric = {
     total_executions: number
     successful_executions: number
     failed_or_other_executions: number
+    time_saving_executions?: number
     total_time_saved_minutes: number
     total_time_saved_hours: number
     total_duration_seconds: number
     avg_time_saved_minutes: number
+    avg_time_saved_per_time_saving_execution?: number
     success_rate: number
     last_started_at: string | null
 }
@@ -59,34 +63,156 @@ type DateRangePreset =
     | 'custom'
 
 const OPERATIONS_START_DATE = '2026-04-28'
+const OPERATIONS_TIME_ZONE = 'America/Chicago'
 
-function getStartOfDay(date: Date) {
-    const copy = new Date(date)
-    copy.setHours(0, 0, 0, 0)
-    return copy
+function padNumber(value: number) {
+    return String(value).padStart(2, '0')
 }
 
-function getEndOfDay(date: Date) {
-    const copy = new Date(date)
-    copy.setHours(23, 59, 59, 999)
-    return copy
+function parseDateInput(dateInput: string) {
+    const [year, month, day] = dateInput.split('-').map(Number)
+    return { year, month, day }
 }
 
-function getOperationsStartDate() {
-    return getStartOfDay(new Date(`${OPERATIONS_START_DATE}T00:00:00`))
+function formatDateInputFromParts(year: number, month: number, day: number) {
+    return `${year}-${padNumber(month)}-${padNumber(day)}`
 }
 
-function clampToOperationsStart(date: Date) {
-    const operationsStart = getOperationsStartDate()
-    return date < operationsStart ? operationsStart : date
-}
+function getTodayInputInTimeZone() {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone: OPERATIONS_TIME_ZONE,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).formatToParts(new Date())
 
-function formatDateInput(date: Date) {
-    const year = date.getFullYear()
-    const month = String(date.getMonth() + 1).padStart(2, '0')
-    const day = String(date.getDate()).padStart(2, '0')
+    const month = parts.find(part => part.type === 'month')?.value || '01'
+    const day = parts.find(part => part.type === 'day')?.value || '01'
+    const year = parts.find(part => part.type === 'year')?.value || '2026'
 
     return `${year}-${month}-${day}`
+}
+
+function addDaysToDateInput(dateInput: string, days: number) {
+    const { year, month, day } = parseDateInput(dateInput)
+    const date = new Date(Date.UTC(year, month - 1, day))
+
+    date.setUTCDate(date.getUTCDate() + days)
+
+    return formatDateInputFromParts(
+        date.getUTCFullYear(),
+        date.getUTCMonth() + 1,
+        date.getUTCDate()
+    )
+}
+
+function getFirstDayOfMonth(dateInput: string) {
+    const { year, month } = parseDateInput(dateInput)
+    return formatDateInputFromParts(year, month, 1)
+}
+
+function getFirstDayOfPreviousMonth(dateInput: string) {
+    const { year, month } = parseDateInput(dateInput)
+    const date = new Date(Date.UTC(year, month - 2, 1))
+
+    return formatDateInputFromParts(
+        date.getUTCFullYear(),
+        date.getUTCMonth() + 1,
+        date.getUTCDate()
+    )
+}
+
+function getLastDayOfPreviousMonth(dateInput: string) {
+    const { year, month } = parseDateInput(dateInput)
+    const date = new Date(Date.UTC(year, month - 1, 0))
+
+    return formatDateInputFromParts(
+        date.getUTCFullYear(),
+        date.getUTCMonth() + 1,
+        date.getUTCDate()
+    )
+}
+
+function clampDateInputToOperationsStart(dateInput: string) {
+    return dateInput < OPERATIONS_START_DATE
+        ? OPERATIONS_START_DATE
+        : dateInput
+}
+
+function getTimeZoneOffsetMs(date: Date, timeZone: string) {
+    const parts = new Intl.DateTimeFormat('en-US', {
+        timeZone,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hourCycle: 'h23',
+    }).formatToParts(date)
+
+    const values = Object.fromEntries(
+        parts
+            .filter(part => part.type !== 'literal')
+            .map(part => [part.type, part.value])
+    )
+
+    const asUTC = Date.UTC(
+        Number(values.year),
+        Number(values.month) - 1,
+        Number(values.day),
+        Number(values.hour),
+        Number(values.minute),
+        Number(values.second)
+    )
+
+    return asUTC - date.getTime()
+}
+
+function zonedDateTimeToUtc({
+    dateInput,
+    hour,
+    minute,
+    second,
+    millisecond,
+}: {
+    dateInput: string
+    hour: number
+    minute: number
+    second: number
+    millisecond: number
+}) {
+    const { year, month, day } = parseDateInput(dateInput)
+
+    const utcGuess = new Date(
+        Date.UTC(year, month - 1, day, hour, minute, second, millisecond)
+    )
+
+    const firstOffset = getTimeZoneOffsetMs(utcGuess, OPERATIONS_TIME_ZONE)
+    const firstPass = new Date(utcGuess.getTime() - firstOffset)
+    const secondOffset = getTimeZoneOffsetMs(firstPass, OPERATIONS_TIME_ZONE)
+
+    return new Date(utcGuess.getTime() - secondOffset)
+}
+
+function getStartOfChicagoDay(dateInput: string) {
+    return zonedDateTimeToUtc({
+        dateInput,
+        hour: 0,
+        minute: 0,
+        second: 0,
+        millisecond: 0,
+    })
+}
+
+function getEndOfChicagoDay(dateInput: string) {
+    return zonedDateTimeToUtc({
+        dateInput,
+        hour: 23,
+        minute: 59,
+        second: 59,
+        millisecond: 999,
+    })
 }
 
 function getDateRange({
@@ -98,89 +224,104 @@ function getDateRange({
     customStartDate: string
     customEndDate: string
 }) {
-    const now = new Date()
-    const todayStart = getStartOfDay(now)
-    const todayEnd = getEndOfDay(now)
+    const todayInput = getTodayInputInTimeZone()
+
+    let startDateInput = OPERATIONS_START_DATE
+    let endDateInput = todayInput
+    let label = 'All Time'
 
     if (preset === 'today') {
-        return {
-            startDate: clampToOperationsStart(todayStart),
-            endDate: todayEnd,
-            label: 'Today',
-        }
+        startDateInput = clampDateInputToOperationsStart(todayInput)
+        endDateInput = todayInput
+        label = 'Today'
     }
 
     if (preset === 'last_7_days') {
-        const start = getStartOfDay(new Date())
-        start.setDate(start.getDate() - 6)
-
-        return {
-            startDate: clampToOperationsStart(start),
-            endDate: todayEnd,
-            label: 'Last 7 Days',
-        }
+        startDateInput = clampDateInputToOperationsStart(
+            addDaysToDateInput(todayInput, -6)
+        )
+        endDateInput = todayInput
+        label = 'Last 7 Days'
     }
 
     if (preset === 'this_month') {
-        const start = getStartOfDay(
-            new Date(now.getFullYear(), now.getMonth(), 1)
+        startDateInput = clampDateInputToOperationsStart(
+            getFirstDayOfMonth(todayInput)
         )
-
-        return {
-            startDate: clampToOperationsStart(start),
-            endDate: todayEnd,
-            label: 'This Month',
-        }
+        endDateInput = todayInput
+        label = 'This Month'
     }
 
     if (preset === 'last_month') {
-        const start = getStartOfDay(
-            new Date(now.getFullYear(), now.getMonth() - 1, 1)
+        startDateInput = clampDateInputToOperationsStart(
+            getFirstDayOfPreviousMonth(todayInput)
         )
+        endDateInput = getLastDayOfPreviousMonth(todayInput)
+        label = 'Last Month'
 
-        const end = getEndOfDay(
-            new Date(now.getFullYear(), now.getMonth(), 0)
-        )
-
-        return {
-            startDate: clampToOperationsStart(start),
-            endDate: end,
-            label: 'Last Month',
+        if (endDateInput < OPERATIONS_START_DATE) {
+            endDateInput = OPERATIONS_START_DATE
         }
     }
 
     if (preset === 'custom') {
-        const start = clampToOperationsStart(
-            getStartOfDay(new Date(`${customStartDate}T00:00:00`))
-        )
+        startDateInput = clampDateInputToOperationsStart(customStartDate)
+        endDateInput = customEndDate
 
-        let end = getEndOfDay(new Date(`${customEndDate}T00:00:00`))
-
-        if (end < start) {
-            end = getEndOfDay(start)
+        if (endDateInput < startDateInput) {
+            endDateInput = startDateInput
         }
 
-        return {
-            startDate: start,
-            endDate: end,
-            label: 'Custom Range',
-        }
+        label = 'Custom Range'
     }
 
     return {
-        startDate: getOperationsStartDate(),
-        endDate: todayEnd,
-        label: 'All Time',
+        startDate: getStartOfChicagoDay(startDateInput),
+        endDate: getEndOfChicagoDay(endDateInput),
+        startDateInput,
+        endDateInput,
+        label,
     }
 }
 
+function formatDateFromInput(dateInput: string) {
+    const { year, month, day } = parseDateInput(dateInput)
+
+    return new Intl.DateTimeFormat('en-US', {
+        timeZone: OPERATIONS_TIME_ZONE,
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+    }).format(new Date(Date.UTC(year, month - 1, day, 12, 0, 0)))
+}
+
+function formatDateRangeLabel({
+    label,
+    startDateInput,
+    endDateInput,
+}: {
+    label: string
+    startDateInput: string
+    endDateInput: string
+}) {
+    const startLabel = formatDateFromInput(startDateInput)
+    const endLabel = formatDateFromInput(endDateInput)
+
+    if (startDateInput === endDateInput) {
+        return `${label}: ${startLabel}`
+    }
+
+    return `${label}: ${startLabel} – ${endLabel}`
+}
+
 export default function OperationsPage() {
-    const todayInput = formatDateInput(new Date())
+    const todayInput = getTodayInputInTimeZone()
 
     const [summary, setSummary] = useState<OperationsSummary | null>(null)
     const [workflows, setWorkflows] = useState<WorkflowMetric[]>([])
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState<string | null>(null)
+    const [reportCopied, setReportCopied] = useState(false)
 
     const [searchQuery, setSearchQuery] = useState('')
     const [sortBy, setSortBy] = useState<SortOption>('time_saved_desc')
@@ -206,12 +347,18 @@ export default function OperationsPage() {
     const displayedStartDate =
         dateRangePreset === 'custom'
             ? customStartDate
-            : formatDateInput(selectedDateRange.startDate)
+            : selectedDateRange.startDateInput
 
     const displayedEndDate =
         dateRangePreset === 'custom'
             ? customEndDate
-            : formatDateInput(selectedDateRange.endDate)
+            : selectedDateRange.endDateInput
+
+    const selectedDateRangeLabel = formatDateRangeLabel({
+        label: selectedDateRange.label,
+        startDateInput: selectedDateRange.startDateInput,
+        endDateInput: selectedDateRange.endDateInput,
+    })
 
     function applyCardFilter({
         filter,
@@ -381,6 +528,113 @@ export default function OperationsPage() {
 
     const visibleWorkflows = filteredWorkflows.slice(0, visibleLimit)
 
+    function buildClickUpReport() {
+        if (!summary) {
+            return ''
+        }
+
+        const topTimeSavedWorkflows = [...workflows]
+            .filter(workflow => workflow.total_time_saved_minutes > 0)
+            .sort(
+                (a, b) =>
+                    b.total_time_saved_minutes - a.total_time_saved_minutes ||
+                    b.successful_executions - a.successful_executions
+            )
+            .slice(0, 5)
+
+        const topExecutionWorkflows = [...workflows]
+            .sort(
+                (a, b) =>
+                    b.total_executions - a.total_executions ||
+                    b.successful_executions - a.successful_executions
+            )
+            .slice(0, 5)
+
+        const topWorkflowText = topWorkflow
+            ? `- ${topWorkflow.workflow_name}
+- Time saved: ${formatTimeSaved(topWorkflow.total_time_saved_minutes)}
+- Successful runs: ${topWorkflow.successful_executions.toLocaleString()}
+- Last run: ${formatDate(topWorkflow.last_started_at)}`
+            : '- No top workflow available'
+
+        const topTimeSavedWorkflowText =
+            topTimeSavedWorkflows.length > 0
+                ? topTimeSavedWorkflows
+                    .map(
+                        (workflow, index) =>
+                            `${index + 1}. ${workflow.workflow_name
+                            } — ${formatTimeSaved(
+                                workflow.total_time_saved_minutes
+                            )}, ${workflow.successful_executions.toLocaleString()} successful runs, ${workflow.success_rate.toFixed(
+                                1
+                            )}% success rate`
+                    )
+                    .join('\n')
+                : 'No workflows with recorded time saved for this period.'
+
+        const topExecutionWorkflowText =
+            topExecutionWorkflows.length > 0
+                ? topExecutionWorkflows
+                    .map(
+                        (workflow, index) =>
+                            `${index + 1}. ${workflow.workflow_name
+                            } — ${workflow.total_executions.toLocaleString()} executions, ${workflow.successful_executions.toLocaleString()} successful, ${workflow.success_rate.toFixed(
+                                1
+                            )}% success rate`
+                    )
+                    .join('\n')
+                : 'No workflow execution data available.'
+
+        return `**Operations Dashboard Update**
+Date Range: ${selectedDateRangeLabel} (${OPERATIONS_TIME_ZONE})
+
+**Summary**
+- Total executions: ${summary.totalExecutions.toLocaleString()}
+- Successful executions: ${summary.successfulExecutions.toLocaleString()}
+- Failed executions: ${summary.failedExecutions.toLocaleString()}
+- Waiting executions: ${summary.waitingExecutions.toLocaleString()}
+- Success rate: ${summary.successRate.toFixed(1)}%
+- Estimated time saved: ${summary.totalTimeSavedMinutes.toFixed(
+            0
+        )} minutes / ${summary.totalHoursSaved.toFixed(1)} hours
+- Estimated workdays saved: ${summary.totalWorkdaysSaved.toFixed(1)}
+
+**Top Impact Workflow**
+${topWorkflowText}
+
+**Top Workflows by Estimated Time Saved**
+${topTimeSavedWorkflowText}
+
+**Top Workflows by Execution Volume**
+${topExecutionWorkflowText}
+
+**Workflow Notes**
+- ${workflows.length.toLocaleString()} workflows were included in this report.
+- ${needsAttentionCount.toLocaleString()} workflows may need review based on failures or low success rate.
+- Time saved is based on execution-level \`time_saved_minutes\` values currently recorded in Supabase.
+- Report generated from the Operations Dashboard.`
+    }
+
+    async function copyClickUpReport() {
+        const report = buildClickUpReport()
+
+        if (!report) {
+            return
+        }
+
+        try {
+            await navigator.clipboard.writeText(report)
+            setReportCopied(true)
+
+            window.setTimeout(() => {
+                setReportCopied(false)
+            }, 2500)
+        } catch (err) {
+            console.error('Failed to copy ClickUp report:', err)
+            alert('Failed to copy report. Please try again.')
+        }
+    }
+
     return (
         <main className="min-h-screen bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 p-8">
             <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-8">
@@ -399,12 +653,22 @@ export default function OperationsPage() {
                     </p>
                 </div>
 
-                <button
-                    onClick={loadOperationsData}
-                    className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-800 text-white text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-700 transition-colors shadow-sm"
-                >
-                    Refresh
-                </button>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <button
+                        onClick={copyClickUpReport}
+                        disabled={!summary}
+                        className="px-4 py-2 rounded-xl border border-[#F07D19]/40 text-[#F07D19] text-sm font-medium hover:bg-[#F07D19]/10 transition-colors shadow-sm disabled:opacity-50"
+                    >
+                        {reportCopied ? 'Report Copied!' : 'Copy ClickUp Report'}
+                    </button>
+
+                    <button
+                        onClick={loadOperationsData}
+                        className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-gray-800 text-white text-sm font-medium hover:bg-gray-800 dark:hover:bg-gray-700 transition-colors shadow-sm"
+                    >
+                        Refresh
+                    </button>
+                </div>
             </div>
 
             <section className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 mb-6 shadow-sm">
@@ -412,7 +676,8 @@ export default function OperationsPage() {
                     <div>
                         <p className="text-sm font-semibold">Date Range</p>
                         <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                            Data is available starting April 28, 2026.
+                            Data is available starting April 28, 2026. Ranges are
+                            calculated using Chicago time.
                         </p>
                     </div>
 
@@ -462,9 +727,7 @@ export default function OperationsPage() {
                         />
 
                         <div className="px-3 py-2.5 rounded-xl bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 text-sm border border-orange-100 dark:border-orange-900">
-                            {selectedDateRange.label}:{' '}
-                            {formatDate(selectedDateRange.startDate.toISOString())}{' '}
-                            – {formatDate(selectedDateRange.endDate.toISOString())}
+                            {selectedDateRangeLabel}
                         </div>
                     </div>
                 </div>
@@ -1050,14 +1313,21 @@ function formatTimeSaved(minutes: number) {
     return `${(minutes / 60).toFixed(1)} hrs`
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | Date | null) {
     if (!value) {
         return '—'
     }
 
-    return new Date(value).toLocaleDateString('en-PH', {
+    const date = value instanceof Date ? value : new Date(value)
+
+    if (Number.isNaN(date.getTime())) {
+        return '—'
+    }
+
+    return new Intl.DateTimeFormat('en-US', {
+        timeZone: OPERATIONS_TIME_ZONE,
         year: 'numeric',
         month: 'short',
         day: 'numeric',
-    })
+    }).format(date)
 }
