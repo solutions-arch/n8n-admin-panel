@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 const STATUS_OPTIONS = ['all', 'success', 'error', 'canceled', 'waiting']
 const INITIAL_LIMIT = 50
 const PAGE_SIZE_OPTIONS = [25, 50, 100]
+const EXECUTIONS_TIME_ZONE = 'America/Chicago'
 
 const DATE_FILTER_OPTIONS = [
   { value: 'all', label: 'All loaded' },
@@ -79,14 +80,58 @@ function getN8nExecutionUrl(execution: any) {
   return `${cleanEditorUrl}/workflow/${execution.workflowId}/executions/${execution.id}`
 }
 
+function getDatePartsInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const year = parts.find(part => part.type === 'year')?.value || ''
+  const month = parts.find(part => part.type === 'month')?.value || ''
+  const day = parts.find(part => part.type === 'day')?.value || ''
+
+  return {
+    year,
+    month,
+    day,
+    dateKey: `${year}-${month}-${day}`,
+    monthKey: `${year}-${month}`,
+  }
+}
+
+function formatDateTimeInChicago(dateString: string | null | undefined) {
+  if (!dateString) return '—'
+
+  const date = new Date(dateString)
+
+  if (Number.isNaN(date.getTime())) return '—'
+
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: EXECUTIONS_TIME_ZONE,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: true,
+    timeZoneName: 'short',
+  }).format(date)
+}
+
 function formatLastUpdated(date: Date | null) {
   if (!date) return 'Not yet updated'
 
-  return date.toLocaleTimeString([], {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: EXECUTIONS_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
     second: '2-digit',
-  })
+    hour12: true,
+    timeZoneName: 'short',
+  }).format(date)
 }
 
 function formatModeLabel(mode: string) {
@@ -113,12 +158,18 @@ function matchesDateFilter(
 
   const now = new Date()
 
+  const startedChicago = getDatePartsInTimeZone(
+    startedDate,
+    EXECUTIONS_TIME_ZONE
+  )
+
+  const nowChicago = getDatePartsInTimeZone(
+    now,
+    EXECUTIONS_TIME_ZONE
+  )
+
   if (dateFilter === 'today') {
-    return (
-      startedDate.getFullYear() === now.getFullYear() &&
-      startedDate.getMonth() === now.getMonth() &&
-      startedDate.getDate() === now.getDate()
-    )
+    return startedChicago.dateKey === nowChicago.dateKey
   }
 
   if (dateFilter === 'last24h') {
@@ -127,31 +178,33 @@ function matchesDateFilter(
   }
 
   if (dateFilter === 'last7d') {
-    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000
-    return startedDate.getTime() >= sevenDaysAgo
+    const sevenDaysAgo = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
+
+    const sevenDaysAgoChicago = getDatePartsInTimeZone(
+      sevenDaysAgo,
+      EXECUTIONS_TIME_ZONE
+    )
+
+    return (
+      startedChicago.dateKey >= sevenDaysAgoChicago.dateKey &&
+      startedChicago.dateKey <= nowChicago.dateKey
+    )
   }
 
   if (dateFilter === 'thisMonth') {
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0)
-    return startedDate >= startOfMonth && startedDate <= now
+    return startedChicago.monthKey === nowChicago.monthKey
   }
 
   if (dateFilter === 'custom') {
     if (!customStartDate && !customEndDate) return true
 
-    let startDate: Date | null = null
-    let endDate: Date | null = null
-
-    if (customStartDate) {
-      startDate = new Date(`${customStartDate}T00:00:00`)
+    if (customStartDate && startedChicago.dateKey < customStartDate) {
+      return false
     }
 
-    if (customEndDate) {
-      endDate = new Date(`${customEndDate}T23:59:59.999`)
+    if (customEndDate && startedChicago.dateKey > customEndDate) {
+      return false
     }
-
-    if (startDate && startedDate < startDate) return false
-    if (endDate && startedDate > endDate) return false
 
     return true
   }
@@ -393,10 +446,6 @@ export default function Home() {
     return modeScopedExecutions.filter(ex => ex.status === 'error').length
   }, [modeScopedExecutions])
 
-  const totalCanceled = useMemo(() => {
-    return modeScopedExecutions.filter(ex => ex.status === 'canceled').length
-  }, [modeScopedExecutions])
-
   const totalWaiting = useMemo(() => {
     return modeScopedExecutions.filter(ex => ex.status === 'waiting').length
   }, [modeScopedExecutions])
@@ -631,6 +680,8 @@ export default function Home() {
               ` · Date filter: ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
             {hasModeFilter &&
               ` · Modes: ${modeFilterLabel}`}
+            {' · '}
+            Timezone: America/Chicago
             {loadingWorkflows && ' · Loading workflow names...'}
             {' · '}
             Last updated {formatLastUpdated(lastUpdated)}
@@ -732,7 +783,8 @@ export default function Home() {
                 ` filtered by ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
               {hasModeFilter &&
                 ` · Modes: ${modeFilterLabel}`}
-              .
+              {' · '}
+              America/Chicago timezone.
             </p>
           </div>
 
@@ -1037,9 +1089,7 @@ export default function Home() {
                     </td>
 
                     <td className="p-4 text-xs text-gray-400 dark:text-gray-500">
-                      {ex.startedAt
-                        ? new Date(ex.startedAt).toLocaleString()
-                        : '—'}
+                      {formatDateTimeInChicago(ex.startedAt)}
                     </td>
 
                     <td className="p-4">
