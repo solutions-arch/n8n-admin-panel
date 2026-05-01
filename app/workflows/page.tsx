@@ -88,25 +88,16 @@ function getAuthorName(value: any) {
     return null
 }
 
-function getLastModifiedBy(workflow: any, versionDetails?: any) {
+function getVersionAuthors(workflow: any, versionDetails?: any) {
     const fromVersion =
         getAuthorName(versionDetails?.authors) ||
         getAuthorName(versionDetails?.author) ||
-        getAuthorName(versionDetails?.createdBy) ||
-        getAuthorName(versionDetails?.updatedBy) ||
-        getAuthorName(versionDetails?.modifiedBy) ||
-        getAuthorName(versionDetails?.lastModifiedBy) ||
         getAuthorName(versionDetails?.activeVersion?.authors)
 
     const fromList =
-        getAuthorName(workflow.authors) ||
         getAuthorName(workflow.activeVersion?.authors) ||
         getAuthorName(workflow.version?.authors) ||
-        getAuthorName(workflow.updatedBy) ||
-        getAuthorName(workflow.modifiedBy) ||
-        getAuthorName(workflow.lastModifiedBy) ||
-        getAuthorName(workflow.updatedByUser) ||
-        getAuthorName(workflow.lastModifiedByUser)
+        getAuthorName(workflow.authors)
 
     return fromVersion || fromList || null
 }
@@ -291,7 +282,7 @@ export default function WorkflowsPage() {
         }))
 
         try {
-            const data = await fetchJson(`/api/workflows/${workflowId}`)
+            const data = await fetchJson(`/api/workflows/${workflowId}/${versionId}`)
 
             setVersionDetails(prev => ({
                 ...prev,
@@ -338,8 +329,8 @@ export default function WorkflowsPage() {
                 const description = String(
                     getWorkflowDescription(workflow, versionDetails[workflow.id]) || ''
                 ).toLowerCase()
-                const modifiedBy = String(
-                    getLastModifiedBy(workflow, versionDetails[workflow.id]) || ''
+                const versionAuthors = String(
+                    getVersionAuthors(workflow, versionDetails[workflow.id]) || ''
                 ).toLowerCase()
 
                 return (
@@ -348,7 +339,7 @@ export default function WorkflowsPage() {
                     tags.includes(query) ||
                     versionId.includes(query) ||
                     description.includes(query) ||
-                    modifiedBy.includes(query)
+                    versionAuthors.includes(query)
                 )
             })
             .sort((a, b) => {
@@ -535,7 +526,7 @@ export default function WorkflowsPage() {
                         type="text"
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Search by workflow name, ID, tag, modifier, or description..."
+                        placeholder="Search by workflow name, ID, tag, author, or description..."
                         className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
                     />
 
@@ -579,7 +570,7 @@ export default function WorkflowsPage() {
 
             <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1350px] text-sm">
+                    <table className="w-full min-w-[1250px] text-sm">
                         <thead>
                             <tr className="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/80">
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
@@ -601,9 +592,6 @@ export default function WorkflowsPage() {
                                     Last Updated
                                 </th>
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                                    Last Modified By
-                                </th>
-                                <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                     Actions
                                 </th>
                             </tr>
@@ -614,10 +602,6 @@ export default function WorkflowsPage() {
                                 const workflowUrl = getN8nWorkflowUrl(workflow.id)
                                 const tags = getTagNames(workflow)
                                 const workflowVersionDetails = versionDetails[workflow.id]
-                                const modifiedBy = getLastModifiedBy(
-                                    workflow,
-                                    workflowVersionDetails
-                                )
                                 const versionId = getVersionId(workflow)
                                 const isExpanded = expandedWorkflowId === workflow.id
                                 const description = getWorkflowDescription(
@@ -625,6 +609,10 @@ export default function WorkflowsPage() {
                                     workflowVersionDetails
                                 )
                                 const estimatedTimeSaved = getEstimatedTimeSaved(
+                                    workflow,
+                                    workflowVersionDetails
+                                )
+                                const versionAuthors = getVersionAuthors(
                                     workflow,
                                     workflowVersionDetails
                                 )
@@ -688,10 +676,6 @@ export default function WorkflowsPage() {
 
                                             <td className="p-4 text-xs text-gray-400 dark:text-gray-500">
                                                 {formatDate(workflow.updatedAt)}
-                                            </td>
-
-                                            <td className="p-4 text-xs text-gray-400 dark:text-gray-500">
-                                                {modifiedBy || '—'}
                                             </td>
 
                                             <td className="p-4">
@@ -772,11 +756,11 @@ export default function WorkflowsPage() {
                                         {isExpanded && (
                                             <tr>
                                                 <td
-                                                    colSpan={8}
+                                                    colSpan={7}
                                                     className="bg-gray-50 p-4 dark:bg-gray-950/60"
                                                 >
                                                     <div className="rounded-lg border border-gray-100 bg-white p-4 text-sm dark:border-gray-800 dark:bg-gray-900">
-                                                        <div className="grid gap-4 md:grid-cols-4">
+                                                        <div className="grid gap-4 md:grid-cols-5">
                                                             <div>
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Version ID
@@ -811,6 +795,15 @@ export default function WorkflowsPage() {
                                                                             ?.updatedAt ||
                                                                         workflow.activeVersion?.updatedAt
                                                                     )}
+                                                                </p>
+                                                            </div>
+
+                                                            <div>
+                                                                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                                                    Version Author(s)
+                                                                </p>
+                                                                <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
+                                                                    {versionAuthors || 'No author metadata returned.'}
                                                                 </p>
                                                             </div>
 
@@ -855,7 +848,7 @@ export default function WorkflowsPage() {
                             {filteredWorkflows.length === 0 && (
                                 <tr>
                                     <td
-                                        colSpan={8}
+                                        colSpan={7}
                                         className="p-8 text-center text-sm text-gray-400 dark:text-gray-500"
                                     >
                                         No workflows found for this search or filter.
