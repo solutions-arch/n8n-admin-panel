@@ -2,6 +2,16 @@
 
 import { NextResponse } from 'next/server'
 
+async function parseResponse(response: Response) {
+    const text = await response.text()
+
+    try {
+        return text ? JSON.parse(text) : {}
+    } catch {
+        return { raw: text }
+    }
+}
+
 export async function GET(request: Request) {
     try {
         const baseUrl = process.env.N8N_BASE_URL
@@ -19,8 +29,9 @@ export async function GET(request: Request) {
         const cursor = searchParams.get('cursor')
         const limit = searchParams.get('limit') || '50'
 
-        const n8nParams = new URLSearchParams()
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
 
+        const n8nParams = new URLSearchParams()
         n8nParams.set('limit', limit)
         n8nParams.set('includeData', 'false')
 
@@ -28,26 +39,19 @@ export async function GET(request: Request) {
             n8nParams.set('cursor', cursor)
         }
 
-        const url = `${baseUrl}/executions?${n8nParams.toString()}`
+        const response = await fetch(
+            `${cleanBaseUrl}/executions?${n8nParams.toString()}`,
+            {
+                method: 'GET',
+                headers: {
+                    'X-N8N-API-KEY': apiKey,
+                    Accept: 'application/json',
+                },
+                cache: 'no-store',
+            }
+        )
 
-        const response = await fetch(url, {
-            method: 'GET',
-            headers: {
-                'X-N8N-API-KEY': apiKey,
-                'Content-Type': 'application/json',
-            },
-            cache: 'no-store',
-        })
-
-        const text = await response.text()
-
-        let data: any = {}
-
-        try {
-            data = text ? JSON.parse(text) : {}
-        } catch {
-            data = { raw: text }
-        }
+        const data = await parseResponse(response)
 
         if (!response.ok) {
             return NextResponse.json(
@@ -60,9 +64,39 @@ export async function GET(request: Request) {
             )
         }
 
-        return NextResponse.json(data)
+        const executions = Array.isArray(data.data) ? data.data : []
+
+        const nextCursor =
+            data.nextCursor ||
+            data.next_cursor ||
+            data.pagination?.nextCursor ||
+            data.pagination?.next_cursor ||
+            null
+
+        return NextResponse.json(
+            {
+                data: executions,
+                count: executions.length,
+                nextCursor,
+                hasMore: Boolean(nextCursor),
+                debug:
+                    process.env.NODE_ENV === 'development'
+                        ? {
+                            rawKeys: Object.keys(data || {}),
+                            receivedCursor: cursor || null,
+                            requestedLimit: limit,
+                            n8nReturnedNextCursor: data.nextCursor || null,
+                        }
+                        : undefined,
+            },
+            {
+                headers: {
+                    'Cache-Control': 'no-store',
+                },
+            }
+        )
     } catch (error) {
-        console.error('n8n fetch error:', error)
+        console.error('n8n executions fetch error:', error)
 
         return NextResponse.json(
             {
