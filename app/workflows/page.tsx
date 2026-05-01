@@ -15,6 +15,19 @@ type SortOption =
     | 'archived-first'
 
 type StatusFilter = 'all' | 'active' | 'inactive' | 'archived'
+type TypeFilter = 'all' | 'Workflow' | 'AI Agent'
+type StageFilter =
+    | 'all'
+    | 'Production'
+    | 'Development'
+    | 'Paused/Retired'
+    | 'Ad hoc'
+
+type ProjectFilter = string
+
+const TYPE_TAGS = ['Workflow', 'AI Agent']
+const STAGE_TAGS = ['Production', 'Development', 'Paused/Retired', 'Ad hoc']
+const PAGE_SIZE_OPTIONS = [10, 15, 25, 50]
 
 function getN8nEditorUrl() {
     const editorUrl = process.env.NEXT_PUBLIC_N8N_EDITOR_URL
@@ -39,7 +52,16 @@ function formatDate(value: string | null | undefined) {
 
     if (Number.isNaN(date.getTime())) return '—'
 
-    return date.toLocaleString()
+    return date.toLocaleString('en-US', {
+        timeZone: 'America/Chicago',
+        month: 'numeric',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: true,
+    })
 }
 
 function getTagNames(workflow: any) {
@@ -51,6 +73,53 @@ function getTagNames(workflow: any) {
             return tag?.name || tag?.tagName || ''
         })
         .filter(Boolean)
+}
+
+function normalizeTag(tag: string) {
+    return tag.trim().toLowerCase()
+}
+
+function hasTag(workflow: any, tagName: string) {
+    const tags = getTagNames(workflow).map(tag => normalizeTag(tag))
+    return tags.includes(normalizeTag(tagName))
+}
+
+function isTypeTag(tag: string) {
+    return TYPE_TAGS.some(typeTag => normalizeTag(typeTag) === normalizeTag(tag))
+}
+
+function isStageTag(tag: string) {
+    return STAGE_TAGS.some(stageTag => normalizeTag(stageTag) === normalizeTag(tag))
+}
+
+function isProjectTag(tag: string) {
+    return !isTypeTag(tag) && !isStageTag(tag)
+}
+
+function getProjectTagsFromWorkflow(workflow: any) {
+    return getTagNames(workflow).filter(isProjectTag)
+}
+
+function getAllProjects(workflows: any[]) {
+    const uniqueProjects = new Set<string>()
+
+    workflows.forEach(workflow => {
+        getProjectTagsFromWorkflow(workflow).forEach(projectTag => {
+            uniqueProjects.add(projectTag)
+        })
+    })
+
+    return Array.from(uniqueProjects).sort((a, b) => a.localeCompare(b))
+}
+
+function workflowHasProject(workflow: any, project: string) {
+    return getProjectTagsFromWorkflow(workflow).some(
+        projectTag => normalizeTag(projectTag) === normalizeTag(project)
+    )
+}
+
+function isUncategorizedWorkflow(workflow: any) {
+    return getProjectTagsFromWorkflow(workflow).length === 0
 }
 
 function getVersionId(workflow: any) {
@@ -162,6 +231,71 @@ async function fetchJson(url: string) {
     return text ? JSON.parse(text) : {}
 }
 
+function MetricCard({
+    label,
+    value,
+    active,
+    onClick,
+    colorClass = 'text-gray-900 dark:text-gray-100',
+}: {
+    label: string
+    value: number
+    active?: boolean
+    onClick?: () => void
+    colorClass?: string
+}) {
+    return (
+        <button
+            onClick={onClick}
+            className={`rounded-xl border p-5 text-left shadow-sm transition hover:shadow-md ${active
+                ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40'
+                : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900'
+                }`}
+        >
+            <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                {label}
+            </p>
+            <p className={`text-3xl font-bold ${colorClass}`}>
+                {value}
+            </p>
+        </button>
+    )
+}
+
+function CompactMetricCard({
+    label,
+    value,
+    active,
+    onClick,
+    badgeClass = 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300',
+}: {
+    label: string
+    value: number
+    active?: boolean
+    onClick?: () => void
+    badgeClass?: string
+}) {
+    return (
+        <button
+            onClick={onClick}
+            className={`rounded-xl border p-4 text-left transition hover:shadow-md ${active
+                ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40'
+                : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900'
+                }`}
+        >
+            <div className="flex items-center justify-between gap-3">
+                <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${badgeClass}`}>
+                    {label}
+                </span>
+
+                <span className="text-3xl font-bold text-gray-900 dark:text-gray-100">
+                    {value}
+                </span>
+            </div>
+        </button>
+    )
+}
+
 export default function WorkflowsPage() {
     const [workflows, setWorkflows] = useState<any[]>([])
     const [loading, setLoading] = useState(true)
@@ -171,7 +305,13 @@ export default function WorkflowsPage() {
     const [searchQuery, setSearchQuery] = useState('')
     const [sortOption, setSortOption] = useState<SortOption>('updated-desc')
     const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+    const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+    const [stageFilter, setStageFilter] = useState<StageFilter>('all')
+    const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all')
     const [lastRefreshed, setLastRefreshed] = useState<Date | null>(null)
+
+    const [currentPage, setCurrentPage] = useState(1)
+    const [pageSize, setPageSize] = useState(10)
 
     const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
     const [actionLoading, setActionLoading] = useState<string | null>(null)
@@ -191,10 +331,10 @@ export default function WorkflowsPage() {
             setWorkflows(data.data || [])
             setLastRefreshed(new Date())
 
-            // Clear cached version details so updated descriptions/time-saved values can reload
             setVersionDetails({})
             setVersionError({})
             setExpandedWorkflowId(null)
+            setCurrentPage(1)
         } catch (error) {
             console.error('Failed to fetch workflows:', error)
             setErrorMessage('Failed to fetch workflows.')
@@ -207,6 +347,18 @@ export default function WorkflowsPage() {
     useEffect(() => {
         loadWorkflows()
     }, [])
+
+    useEffect(() => {
+        setCurrentPage(1)
+    }, [
+        searchQuery,
+        sortOption,
+        statusFilter,
+        typeFilter,
+        stageFilter,
+        projectFilter,
+        pageSize,
+    ])
 
     const toggleWorkflow = async (id: string, currentActive: boolean) => {
         setActionLoading(id)
@@ -282,20 +434,48 @@ export default function WorkflowsPage() {
         }))
 
         try {
-            const data = await fetchJson(`/api/workflows/${workflowId}/${versionId}`)
+            const [workflowDetailResult, versionDetailResult] = await Promise.allSettled([
+                fetchJson(`/api/workflows/${workflowId}`),
+                fetchJson(`/api/workflows/${workflowId}/${versionId}`),
+            ])
+
+            const workflowDetail =
+                workflowDetailResult.status === 'fulfilled'
+                    ? workflowDetailResult.value
+                    : {}
+
+            const versionDetail =
+                versionDetailResult.status === 'fulfilled'
+                    ? versionDetailResult.value
+                    : {}
+
+            const mergedDetails = {
+                ...workflowDetail,
+                ...versionDetail,
+                description:
+                    workflowDetail.description ||
+                    workflowDetail.activeVersion?.description ||
+                    versionDetail.description ||
+                    versionDetail.activeVersion?.description ||
+                    null,
+                settings: {
+                    ...(workflowDetail.settings || {}),
+                    ...(versionDetail.settings || {}),
+                },
+            }
 
             setVersionDetails(prev => ({
                 ...prev,
-                [workflowId]: data,
+                [workflowId]: mergedDetails,
             }))
 
             setExpandedWorkflowId(workflowId)
         } catch (error) {
-            console.error('Failed to fetch workflow version details:', error)
+            console.error('Failed to fetch workflow details:', error)
 
             setVersionError(prev => ({
                 ...prev,
-                [workflowId]: 'Failed to load version details.',
+                [workflowId]: 'Failed to load workflow details.',
             }))
 
             setExpandedWorkflowId(workflowId)
@@ -304,15 +484,60 @@ export default function WorkflowsPage() {
         }
     }
 
-    const totalWorkflows = workflows.length
-    const activeWorkflows = workflows.filter(wf => wf.active).length
-    const inactiveWorkflows = workflows.filter(wf => !wf.active).length
-    const archivedWorkflows = workflows.filter(wf => wf.isArchived).length
+    const allProjects = useMemo(() => {
+        return getAllProjects(workflows)
+    }, [workflows])
+
+    const projectScopedWorkflows = useMemo(() => {
+        return workflows.filter(workflow => {
+            if (projectFilter === 'all') return true
+            if (projectFilter === 'uncategorized') return isUncategorizedWorkflow(workflow)
+
+            return workflowHasProject(workflow, projectFilter)
+        })
+    }, [workflows, projectFilter])
+
+    const operationalCounts = useMemo(() => {
+        return {
+            total: projectScopedWorkflows.length,
+            active: projectScopedWorkflows.filter(wf => wf.active).length,
+            disabled: projectScopedWorkflows.filter(wf => !wf.active).length,
+            archived: projectScopedWorkflows.filter(wf => wf.isArchived).length,
+        }
+    }, [projectScopedWorkflows])
+
+    const typeCounts = useMemo(() => {
+        return {
+            workflow: projectScopedWorkflows.filter(workflow =>
+                hasTag(workflow, 'Workflow')
+            ).length,
+            aiAgent: projectScopedWorkflows.filter(workflow =>
+                hasTag(workflow, 'AI Agent')
+            ).length,
+        }
+    }, [projectScopedWorkflows])
+
+    const stageCounts = useMemo(() => {
+        return {
+            production: projectScopedWorkflows.filter(workflow =>
+                hasTag(workflow, 'Production')
+            ).length,
+            development: projectScopedWorkflows.filter(workflow =>
+                hasTag(workflow, 'Development')
+            ).length,
+            pausedRetired: projectScopedWorkflows.filter(workflow =>
+                hasTag(workflow, 'Paused/Retired')
+            ).length,
+            adHoc: projectScopedWorkflows.filter(workflow =>
+                hasTag(workflow, 'Ad hoc')
+            ).length,
+        }
+    }, [projectScopedWorkflows])
 
     const filteredWorkflows = useMemo(() => {
         const query = searchQuery.trim().toLowerCase()
 
-        return workflows
+        return projectScopedWorkflows
             .filter(workflow => {
                 if (statusFilter === 'active') return workflow.active === true
                 if (statusFilter === 'inactive') return workflow.active === false
@@ -320,11 +545,20 @@ export default function WorkflowsPage() {
                 return true
             })
             .filter(workflow => {
+                if (typeFilter === 'all') return true
+                return hasTag(workflow, typeFilter)
+            })
+            .filter(workflow => {
+                if (stageFilter === 'all') return true
+                return hasTag(workflow, stageFilter)
+            })
+            .filter(workflow => {
                 if (!query) return true
 
                 const name = String(workflow.name || '').toLowerCase()
                 const id = String(workflow.id || '').toLowerCase()
                 const tags = getTagNames(workflow).join(' ').toLowerCase()
+                const projects = getProjectTagsFromWorkflow(workflow).join(' ').toLowerCase()
                 const versionId = String(getVersionId(workflow) || '').toLowerCase()
                 const description = String(
                     getWorkflowDescription(workflow, versionDetails[workflow.id]) || ''
@@ -337,6 +571,7 @@ export default function WorkflowsPage() {
                     name.includes(query) ||
                     id.includes(query) ||
                     tags.includes(query) ||
+                    projects.includes(query) ||
                     versionId.includes(query) ||
                     description.includes(query) ||
                     versionAuthors.includes(query)
@@ -376,12 +611,39 @@ export default function WorkflowsPage() {
 
                 return 0
             })
-    }, [workflows, searchQuery, sortOption, statusFilter, versionDetails])
+    }, [
+        projectScopedWorkflows,
+        searchQuery,
+        sortOption,
+        statusFilter,
+        typeFilter,
+        stageFilter,
+        versionDetails,
+    ])
+
+    const totalPages = Math.max(1, Math.ceil(filteredWorkflows.length / pageSize))
+    const safeCurrentPage = Math.min(currentPage, totalPages)
+
+    const paginationStart =
+        filteredWorkflows.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize
+
+    const paginationEnd = Math.min(safeCurrentPage * pageSize, filteredWorkflows.length)
+
+    const paginatedWorkflows = useMemo(() => {
+        const start = (safeCurrentPage - 1) * pageSize
+        const end = start + pageSize
+
+        return filteredWorkflows.slice(start, end)
+    }, [filteredWorkflows, safeCurrentPage, pageSize])
 
     const clearFilters = () => {
         setSearchQuery('')
         setStatusFilter('all')
+        setTypeFilter('all')
+        setStageFilter('all')
+        setProjectFilter('all')
         setSortOption('updated-desc')
+        setCurrentPage(1)
     }
 
     const editorUrl = getN8nEditorUrl()
@@ -420,12 +682,21 @@ export default function WorkflowsPage() {
                     </h2>
 
                     <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
-                        Showing {filteredWorkflows.length} of {totalWorkflows} workflows
+                        Showing {filteredWorkflows.length} of {projectScopedWorkflows.length} workflows
+                        {projectFilter !== 'all' &&
+                            ` · Project: ${projectFilter === 'uncategorized'
+                                ? 'Uncategorized'
+                                : projectFilter
+                            }`}
+                        {typeFilter !== 'all' && ` · Type: ${typeFilter}`}
+                        {stageFilter !== 'all' && ` · Stage: ${stageFilter}`}
                         {lastRefreshed &&
-                            ` · Last refreshed ${lastRefreshed.toLocaleTimeString([], {
+                            ` · Last refreshed ${lastRefreshed.toLocaleTimeString('en-US', {
+                                timeZone: 'America/Chicago',
                                 hour: '2-digit',
                                 minute: '2-digit',
                                 second: '2-digit',
+                                hour12: true,
                             })}`}
                     </p>
 
@@ -458,66 +729,196 @@ export default function WorkflowsPage() {
                 </div>
             </div>
 
+            <div className="mb-4 flex flex-col gap-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 md:flex-row md:items-center md:justify-between">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center">
+                    <select
+                        value={projectFilter}
+                        onChange={e => {
+                            setProjectFilter(e.target.value as ProjectFilter)
+                            setStatusFilter('all')
+                            setTypeFilter('all')
+                            setStageFilter('all')
+                            setCurrentPage(1)
+                        }}
+                        className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
+                    >
+                        <option value="all">Project: All</option>
+
+                        {allProjects.map(project => (
+                            <option key={project} value={project}>
+                                Project: {project}
+                            </option>
+                        ))}
+
+                        <option value="uncategorized">Project: Uncategorized</option>
+                    </select>
+
+                    {(searchQuery ||
+                        statusFilter !== 'all' ||
+                        typeFilter !== 'all' ||
+                        stageFilter !== 'all' ||
+                        projectFilter !== 'all' ||
+                        sortOption !== 'updated-desc') && (
+                            <button
+                                onClick={clearFilters}
+                                className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                                Reset view
+                            </button>
+                        )}
+                </div>
+
+                <p className="text-sm text-gray-400 dark:text-gray-500">
+                    Summary cards reflect the selected project scope.
+                </p>
+            </div>
+
             <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-4">
-                <button
+                <MetricCard
+                    label="Total"
+                    value={operationalCounts.total}
+                    active={statusFilter === 'all'}
                     onClick={() => setStatusFilter('all')}
-                    className={`rounded-xl border p-5 text-left shadow-sm transition hover:shadow-md ${statusFilter === 'all'
-                        ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40'
-                        : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900'
-                        }`}
-                >
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                        Total
-                    </p>
-                    <p className="text-3xl font-bold text-gray-900 dark:text-gray-100">
-                        {totalWorkflows}
-                    </p>
-                </button>
+                    colorClass="text-gray-900 dark:text-gray-100"
+                />
 
-                <button
+                <MetricCard
+                    label="Active"
+                    value={operationalCounts.active}
+                    active={statusFilter === 'active'}
                     onClick={() => setStatusFilter('active')}
-                    className={`rounded-xl border p-5 text-left shadow-sm transition hover:shadow-md ${statusFilter === 'active'
-                        ? 'border-green-400 bg-green-50 dark:border-green-500 dark:bg-green-950/40'
-                        : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900'
-                        }`}
-                >
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                        Active
-                    </p>
-                    <p className="text-3xl font-bold text-green-600 dark:text-green-400">
-                        {activeWorkflows}
-                    </p>
-                </button>
+                    colorClass="text-green-600 dark:text-green-400"
+                />
 
-                <button
+                <MetricCard
+                    label="Disabled"
+                    value={operationalCounts.disabled}
+                    active={statusFilter === 'inactive'}
                     onClick={() => setStatusFilter('inactive')}
-                    className={`rounded-xl border p-5 text-left shadow-sm transition hover:shadow-md ${statusFilter === 'inactive'
-                        ? 'border-gray-400 bg-gray-100 dark:border-gray-500 dark:bg-gray-800'
-                        : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900'
-                        }`}
-                >
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                        Inactive
-                    </p>
-                    <p className="text-3xl font-bold text-gray-400 dark:text-gray-500">
-                        {inactiveWorkflows}
-                    </p>
-                </button>
+                    colorClass="text-gray-400 dark:text-gray-500"
+                />
 
-                <button
+                <MetricCard
+                    label="Archived"
+                    value={operationalCounts.archived}
+                    active={statusFilter === 'archived'}
                     onClick={() => setStatusFilter('archived')}
-                    className={`rounded-xl border p-5 text-left shadow-sm transition hover:shadow-md ${statusFilter === 'archived'
-                        ? 'border-orange-400 bg-orange-50 dark:border-orange-500 dark:bg-orange-950/40'
-                        : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900'
-                        }`}
-                >
-                    <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                        Archived
-                    </p>
-                    <p className="text-3xl font-bold text-orange-500 dark:text-orange-400">
-                        {archivedWorkflows}
-                    </p>
-                </button>
+                    colorClass="text-orange-500 dark:text-orange-400"
+                />
+            </div>
+
+            <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                                Automation Type
+                            </h3>
+                            <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
+                                Based on Workflow / AI Agent tags.
+                            </p>
+                        </div>
+
+                        {typeFilter !== 'all' && (
+                            <button
+                                onClick={() => setTypeFilter('all')}
+                                className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                                Clear type
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <CompactMetricCard
+                            label="Workflow"
+                            value={typeCounts.workflow}
+                            active={typeFilter === 'Workflow'}
+                            onClick={() =>
+                                setTypeFilter(typeFilter === 'Workflow' ? 'all' : 'Workflow')
+                            }
+                            badgeClass="bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                        />
+
+                        <CompactMetricCard
+                            label="AI Agent"
+                            value={typeCounts.aiAgent}
+                            active={typeFilter === 'AI Agent'}
+                            onClick={() =>
+                                setTypeFilter(typeFilter === 'AI Agent' ? 'all' : 'AI Agent')
+                            }
+                            badgeClass="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                        />
+                    </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm dark:border-gray-800 dark:bg-gray-900">
+                    <div className="mb-4 flex items-center justify-between gap-3">
+                        <div>
+                            <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+                                Lifecycle Stage
+                            </h3>
+                            <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
+                                Based on Production / Development / Paused/Retired / Ad hoc tags.
+                            </p>
+                        </div>
+
+                        {stageFilter !== 'all' && (
+                            <button
+                                onClick={() => setStageFilter('all')}
+                                className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                                Clear stage
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                        <CompactMetricCard
+                            label="Production"
+                            value={stageCounts.production}
+                            active={stageFilter === 'Production'}
+                            onClick={() =>
+                                setStageFilter(stageFilter === 'Production' ? 'all' : 'Production')
+                            }
+                            badgeClass="bg-green-50 text-green-700 dark:bg-green-950/50 dark:text-green-300"
+                        />
+
+                        <CompactMetricCard
+                            label="Development"
+                            value={stageCounts.development}
+                            active={stageFilter === 'Development'}
+                            onClick={() =>
+                                setStageFilter(stageFilter === 'Development' ? 'all' : 'Development')
+                            }
+                            badgeClass="bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
+                        />
+
+                        <CompactMetricCard
+                            label="Paused/Retired"
+                            value={stageCounts.pausedRetired}
+                            active={stageFilter === 'Paused/Retired'}
+                            onClick={() =>
+                                setStageFilter(
+                                    stageFilter === 'Paused/Retired'
+                                        ? 'all'
+                                        : 'Paused/Retired'
+                                )
+                            }
+                            badgeClass="bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                        />
+
+                        <CompactMetricCard
+                            label="Ad hoc"
+                            value={stageCounts.adHoc}
+                            active={stageFilter === 'Ad hoc'}
+                            onClick={() =>
+                                setStageFilter(stageFilter === 'Ad hoc' ? 'all' : 'Ad hoc')
+                            }
+                            badgeClass="bg-purple-50 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300"
+                        />
+                    </div>
+                </div>
             </div>
 
             <div className="mb-4 flex flex-col gap-3 rounded-xl border border-gray-100 bg-white p-4 shadow-sm dark:border-gray-800 dark:bg-gray-900 md:flex-row md:items-center md:justify-between">
@@ -526,7 +927,7 @@ export default function WorkflowsPage() {
                         type="text"
                         value={searchQuery}
                         onChange={e => setSearchQuery(e.target.value)}
-                        placeholder="Search by workflow name, ID, tag, author, or description..."
+                        placeholder="Search by workflow name, ID, tag, project, author, or description..."
                         className="w-full rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
                     />
 
@@ -553,54 +954,42 @@ export default function WorkflowsPage() {
                         <option value="name-asc">Sort: Name A–Z</option>
                         <option value="name-desc">Sort: Name Z–A</option>
                         <option value="active-first">Sort: Active first</option>
-                        <option value="inactive-first">Sort: Inactive first</option>
+                        <option value="inactive-first">Sort: Disabled first</option>
                         <option value="archived-first">Sort: Archived first</option>
                     </select>
-
-                    {(searchQuery || statusFilter !== 'all' || sortOption !== 'updated-desc') && (
-                        <button
-                            onClick={clearFilters}
-                            className="text-sm font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-                        >
-                            Reset view
-                        </button>
-                    )}
                 </div>
             </div>
 
             <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[1250px] text-sm">
+                    <table className="w-full min-w-[950px] text-sm">
                         <thead>
                             <tr className="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/80">
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                     Workflow
                                 </th>
+
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                     Status
                                 </th>
-                                <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                                    Archive
-                                </th>
-                                <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                                    Tags
-                                </th>
+
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                     Created
                                 </th>
+
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                     Last Updated
                                 </th>
+
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
-                                    Actions
+                                    Manage
                                 </th>
                             </tr>
                         </thead>
 
                         <tbody className="divide-y divide-gray-50 dark:divide-gray-800">
-                            {filteredWorkflows.map(workflow => {
+                            {paginatedWorkflows.map(workflow => {
                                 const workflowUrl = getN8nWorkflowUrl(workflow.id)
-                                const tags = getTagNames(workflow)
                                 const workflowVersionDetails = versionDetails[workflow.id]
                                 const versionId = getVersionId(workflow)
                                 const isExpanded = expandedWorkflowId === workflow.id
@@ -624,6 +1013,7 @@ export default function WorkflowsPage() {
                                                 <p className="font-medium text-gray-800 dark:text-gray-100">
                                                     {workflow.name}
                                                 </p>
+
                                                 <p className="mt-1 font-mono text-xs text-gray-300 dark:text-gray-600">
                                                     {workflow.id}
                                                 </p>
@@ -636,38 +1026,8 @@ export default function WorkflowsPage() {
                                                         : 'bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400'
                                                         }`}
                                                 >
-                                                    {workflow.active ? 'Active' : 'Inactive'}
+                                                    {workflow.active ? 'Active' : 'Disabled'}
                                                 </span>
-                                            </td>
-
-                                            <td className="p-4">
-                                                <span
-                                                    className={`rounded-full px-2.5 py-1 text-xs font-semibold ${workflow.isArchived
-                                                        ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/50 dark:text-orange-300'
-                                                        : 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300'
-                                                        }`}
-                                                >
-                                                    {workflow.isArchived ? 'Archived' : 'Current'}
-                                                </span>
-                                            </td>
-
-                                            <td className="p-4">
-                                                <div className="flex max-w-xs flex-wrap gap-1">
-                                                    {tags.length > 0 ? (
-                                                        tags.map(tag => (
-                                                            <span
-                                                                key={`${workflow.id}-${tag}`}
-                                                                className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-500 dark:bg-gray-800 dark:text-gray-400"
-                                                            >
-                                                                {tag}
-                                                            </span>
-                                                        ))
-                                                    ) : (
-                                                        <span className="text-xs text-gray-400 dark:text-gray-500">
-                                                            —
-                                                        </span>
-                                                    )}
-                                                </div>
                                             </td>
 
                                             <td className="p-4 text-xs text-gray-400 dark:text-gray-500">
@@ -679,14 +1039,14 @@ export default function WorkflowsPage() {
                                             </td>
 
                                             <td className="p-4">
-                                                <div className="flex min-w-[230px] flex-col gap-2">
-                                                    <div className="flex flex-wrap items-center gap-2">
+                                                <div className="flex min-w-[260px] flex-col gap-2">
+                                                    <div className="inline-flex w-fit overflow-hidden rounded-lg border border-gray-200 bg-white dark:border-gray-700 dark:bg-gray-950">
                                                         {workflowUrl && (
                                                             <a
                                                                 href={workflowUrl}
                                                                 target="_blank"
                                                                 rel="noopener noreferrer"
-                                                                className="inline-flex items-center rounded-lg border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+                                                                className="border-r border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition hover:bg-gray-50 hover:text-gray-900 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-800"
                                                             >
                                                                 Open ↗
                                                             </a>
@@ -695,16 +1055,16 @@ export default function WorkflowsPage() {
                                                         <button
                                                             onClick={() => loadVersionDetails(workflow)}
                                                             disabled={versionLoadingId === workflow.id}
-                                                            className={`inline-flex items-center rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${isExpanded
-                                                                    ? 'border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60'
-                                                                    : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
+                                                            className={`px-3 py-1.5 text-xs font-medium transition disabled:opacity-50 ${isExpanded
+                                                                ? 'bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300'
+                                                                : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-200 dark:hover:bg-gray-800'
                                                                 }`}
                                                         >
                                                             {versionLoadingId === workflow.id
                                                                 ? 'Loading...'
                                                                 : isExpanded
                                                                     ? 'Hide Details'
-                                                                    : 'View Details'}
+                                                                    : 'Details'}
                                                         </button>
                                                     </div>
 
@@ -714,21 +1074,21 @@ export default function WorkflowsPage() {
                                                                 toggleWorkflow(workflow.id, workflow.active)
                                                             }
                                                             disabled={actionLoading === workflow.id}
-                                                            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${workflow.active
-                                                                    ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-300 dark:hover:bg-yellow-900/60'
-                                                                    : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
+                                                            className={`inline-flex min-w-[92px] items-center justify-center rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${workflow.active
+                                                                ? 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200 dark:bg-yellow-900/40 dark:text-yellow-300 dark:hover:bg-yellow-900/60'
+                                                                : 'bg-green-100 text-green-700 hover:bg-green-200 dark:bg-green-900/40 dark:text-green-300 dark:hover:bg-green-900/60'
                                                                 }`}
                                                         >
                                                             {actionLoading === workflow.id
-                                                                ? '...'
+                                                                ? 'Updating...'
                                                                 : workflow.active
                                                                     ? 'Deactivate'
                                                                     : 'Activate'}
                                                         </button>
 
                                                         {confirmDelete === workflow.id ? (
-                                                            <div className="flex flex-wrap items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 dark:border-red-900 dark:bg-red-950/30">
-                                                                <span className="text-xs text-red-600 dark:text-red-300">
+                                                            <div className="flex items-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1 dark:border-red-900 dark:bg-red-950/30">
+                                                                <span className="text-xs font-medium text-red-600 dark:text-red-300">
                                                                     Delete?
                                                                 </span>
 
@@ -744,13 +1104,13 @@ export default function WorkflowsPage() {
                                                                     onClick={() => setConfirmDelete(null)}
                                                                     className="rounded-md bg-white px-2.5 py-1 text-xs font-medium text-gray-600 hover:bg-gray-100 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
                                                                 >
-                                                                    Cancel
+                                                                    No
                                                                 </button>
                                                             </div>
                                                         ) : (
                                                             <button
                                                                 onClick={() => setConfirmDelete(workflow.id)}
-                                                                className="rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-medium text-red-600 transition-colors hover:bg-red-100 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/70"
+                                                                className="rounded-lg border border-red-200 px-3 py-1.5 text-xs font-medium text-red-500 transition hover:bg-red-50 dark:border-red-900/70 dark:text-red-300 dark:hover:bg-red-950/40"
                                                             >
                                                                 Delete
                                                             </button>
@@ -763,7 +1123,7 @@ export default function WorkflowsPage() {
                                         {isExpanded && (
                                             <tr>
                                                 <td
-                                                    colSpan={7}
+                                                    colSpan={5}
                                                     className="bg-gray-50 p-4 dark:bg-gray-950/60"
                                                 >
                                                     <div className="rounded-lg border border-gray-100 bg-white p-4 text-sm dark:border-gray-800 dark:bg-gray-900">
@@ -772,6 +1132,7 @@ export default function WorkflowsPage() {
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Version ID
                                                                 </p>
+
                                                                 <p className="mt-1 font-mono text-xs text-gray-600 dark:text-gray-300">
                                                                     {versionId || '—'}
                                                                 </p>
@@ -781,6 +1142,7 @@ export default function WorkflowsPage() {
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Version Created
                                                                 </p>
+
                                                                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
                                                                     {formatDate(
                                                                         workflowVersionDetails?.createdAt ||
@@ -795,6 +1157,7 @@ export default function WorkflowsPage() {
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Version Updated
                                                                 </p>
+
                                                                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
                                                                     {formatDate(
                                                                         workflowVersionDetails?.updatedAt ||
@@ -809,6 +1172,7 @@ export default function WorkflowsPage() {
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Version Author(s)
                                                                 </p>
+
                                                                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
                                                                     {versionAuthors || 'No author metadata returned.'}
                                                                 </p>
@@ -818,6 +1182,7 @@ export default function WorkflowsPage() {
                                                                 <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                                                     Estimated Time Saved
                                                                 </p>
+
                                                                 <p className="mt-1 text-xs text-gray-600 dark:text-gray-300">
                                                                     {formatEstimatedTimeSaved(
                                                                         estimatedTimeSaved.minutes
@@ -855,7 +1220,7 @@ export default function WorkflowsPage() {
                             {filteredWorkflows.length === 0 && (
                                 <tr>
                                     <td
-                                        colSpan={7}
+                                        colSpan={5}
                                         className="p-8 text-center text-sm text-gray-400 dark:text-gray-500"
                                     >
                                         No workflows found for this search or filter.
@@ -865,6 +1230,56 @@ export default function WorkflowsPage() {
                         </tbody>
                     </table>
                 </div>
+
+                {filteredWorkflows.length > 0 && (
+                    <div className="flex flex-col gap-3 border-t border-gray-100 px-4 py-4 dark:border-gray-800 md:flex-row md:items-center md:justify-between">
+                        <p className="text-sm text-gray-400 dark:text-gray-500">
+                            Showing {paginationStart + 1}–{paginationEnd} of{' '}
+                            {filteredWorkflows.length} workflows
+                        </p>
+
+                        <div className="flex flex-wrap items-center gap-2">
+                            <select
+                                value={pageSize}
+                                onChange={e => {
+                                    setPageSize(Number(e.target.value))
+                                    setCurrentPage(1)
+                                }}
+                                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
+                            >
+                                {PAGE_SIZE_OPTIONS.map(size => (
+                                    <option key={size} value={size}>
+                                        {size} rows
+                                    </option>
+                                ))}
+                            </select>
+
+                            <button
+                                onClick={() =>
+                                    setCurrentPage(page => Math.max(1, page - 1))
+                                }
+                                disabled={safeCurrentPage === 1}
+                                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                                Previous
+                            </button>
+
+                            <span className="px-2 text-sm text-gray-500 dark:text-gray-400">
+                                Page {safeCurrentPage} of {totalPages}
+                            </span>
+
+                            <button
+                                onClick={() =>
+                                    setCurrentPage(page => Math.min(totalPages, page + 1))
+                                }
+                                disabled={safeCurrentPage === totalPages}
+                                className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition hover:border-gray-300 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-800"
+                            >
+                                Next
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
         </div>
     )
