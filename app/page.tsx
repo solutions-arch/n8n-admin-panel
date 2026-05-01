@@ -4,7 +4,6 @@
 import useSWR from 'swr'
 import { useEffect, useMemo, useState } from 'react'
 
-const STATUS_OPTIONS = ['all', 'success', 'error', 'canceled', 'waiting']
 const INITIAL_LIMIT = 50
 const PAGE_SIZE_OPTIONS = [25, 50, 100]
 const EXECUTIONS_TIME_ZONE = 'America/Chicago'
@@ -22,18 +21,29 @@ function StatCard({
   label,
   value,
   color,
+  active,
+  onClick,
 }: {
   label: string
   value: number | string
   color: string
+  active?: boolean
+  onClick?: () => void
 }) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white p-5 shadow-sm transition-colors dark:border-gray-800 dark:bg-gray-900 dark:shadow-black/20">
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-xl border p-5 text-left shadow-sm transition-colors hover:shadow-md ${active
+          ? 'border-blue-400 bg-blue-50 dark:border-blue-500 dark:bg-blue-950/40'
+          : 'border-gray-100 bg-white dark:border-gray-800 dark:bg-gray-900 dark:shadow-black/20'
+        }`}
+    >
       <p className="mb-1 text-xs font-medium uppercase tracking-wider text-gray-400 dark:text-gray-500">
         {label}
       </p>
       <p className={`text-3xl font-bold ${color}`}>{value}</p>
-    </div>
+    </button>
   )
 }
 
@@ -446,6 +456,10 @@ export default function Home() {
     return modeScopedExecutions.filter(ex => ex.status === 'error').length
   }, [modeScopedExecutions])
 
+  const totalCanceled = useMemo(() => {
+    return modeScopedExecutions.filter(ex => ex.status === 'canceled').length
+  }, [modeScopedExecutions])
+
   const totalWaiting = useMemo(() => {
     return modeScopedExecutions.filter(ex => ex.status === 'waiting').length
   }, [modeScopedExecutions])
@@ -676,10 +690,14 @@ export default function Home() {
 
           <p className="mt-1 text-sm text-gray-400 dark:text-gray-400">
             Showing {filtered.length} of {executions.length} loaded executions
+            {statusFilter !== 'all' &&
+              ` · Status: ${statusFilter.charAt(0).toUpperCase() + statusFilter.slice(1)}`}
             {dateFilter !== 'all' &&
               ` · Date filter: ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
             {hasModeFilter &&
               ` · Modes: ${modeFilterLabel}`}
+            {' · '}
+            Success rate: {successRate}
             {' · '}
             Timezone: America/Chicago
             {loadingWorkflows && ' · Loading workflow names...'}
@@ -703,7 +721,6 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Compact Health Banner */}
       <div className={`mb-8 flex items-center justify-between gap-4 rounded-xl border px-5 py-4 ${healthBannerClasses}`}>
         <div className="flex items-center gap-3">
           <span className="text-xl">{healthBanner.icon}</span>
@@ -734,32 +751,42 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Stats */}
+      {/* Status Cards */}
       <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label="Total"
           value={total}
           color="text-gray-900 dark:text-white"
+          active={statusFilter === 'all'}
+          onClick={() => setStatusFilter('all')}
         />
         <StatCard
           label="Success"
           value={totalSuccess}
           color="text-green-500"
+          active={statusFilter === 'success'}
+          onClick={() => setStatusFilter('success')}
         />
         <StatCard
           label="Errors"
           value={totalErrors}
           color="text-red-500"
+          active={statusFilter === 'error'}
+          onClick={() => setStatusFilter('error')}
+        />
+        <StatCard
+          label="Canceled"
+          value={totalCanceled}
+          color="text-yellow-500"
+          active={statusFilter === 'canceled'}
+          onClick={() => setStatusFilter('canceled')}
         />
         <StatCard
           label="Waiting"
           value={totalWaiting}
           color="text-blue-500"
-        />
-        <StatCard
-          label="Success Rate"
-          value={successRate}
-          color="text-blue-500"
+          active={statusFilter === 'waiting'}
+          onClick={() => setStatusFilter('waiting')}
         />
       </div>
 
@@ -862,7 +889,6 @@ export default function Home() {
           ))}
         </select>
 
-        {/* Mode Multi-Select */}
         <div className="relative">
           <button
             type="button"
@@ -968,32 +994,6 @@ export default function Home() {
               Clear filters
             </button>
           )}
-      </div>
-
-      {/* Status Filter */}
-      <div className="mb-5 flex flex-wrap gap-2">
-        {STATUS_OPTIONS.map(status => {
-          const count =
-            status === 'all'
-              ? total
-              : modeScopedExecutions.filter(ex => ex.status === status).length
-
-          return (
-            <button
-              key={status}
-              onClick={() => setStatusFilter(status)}
-              className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${statusFilter === status
-                  ? 'border-gray-900 bg-gray-900 text-white dark:border-white dark:bg-white dark:text-gray-950'
-                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-400 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-300 dark:hover:border-gray-500'
-                }`}
-            >
-              {status === 'all'
-                ? 'All'
-                : status.charAt(0).toUpperCase() + status.slice(1)}{' '}
-              ({count})
-            </button>
-          )
-        })}
       </div>
 
       {/* Table */}
@@ -1121,8 +1121,7 @@ export default function Home() {
       {filtered.length > 0 && (
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <p className="text-sm text-gray-400 dark:text-gray-500">
-            Showing {paginationStart + 1}–{paginationEnd} of {filtered.length} filtered executions
-            {' '}
+            Showing {paginationStart + 1}–{paginationEnd} of {filtered.length} filtered executions{' '}
             <span className="text-gray-300 dark:text-gray-600">
               ({executions.length} loaded)
             </span>
