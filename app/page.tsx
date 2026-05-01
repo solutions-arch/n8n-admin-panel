@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from 'react'
 
 const STATUS_OPTIONS = ['all', 'success', 'error', 'canceled', 'waiting']
 const INITIAL_LIMIT = 50
+const PAGE_SIZE_OPTIONS = [25, 50, 100]
 
 const DATE_FILTER_OPTIONS = [
   { value: 'all', label: 'All loaded' },
@@ -91,6 +92,10 @@ function formatLastUpdated(date: Date | null) {
 function formatModeLabel(mode: string) {
   if (!mode) return 'Unknown'
   return mode.charAt(0).toUpperCase() + mode.slice(1)
+}
+
+function normalizeMode(mode: string | null | undefined) {
+  return String(mode || '').toLowerCase()
 }
 
 function matchesDateFilter(
@@ -193,7 +198,8 @@ async function fetchJson(url: string) {
 export default function Home() {
   const [statusFilter, setStatusFilter] = useState('all')
   const [workflowFilter, setWorkflowFilter] = useState('all')
-  const [modeFilter, setModeFilter] = useState('all')
+  const [selectedModes, setSelectedModes] = useState<string[] | null>(null)
+  const [modeMenuOpen, setModeMenuOpen] = useState(false)
   const [dateFilter, setDateFilter] = useState('all')
   const [customStartDate, setCustomStartDate] = useState('')
   const [customEndDate, setCustomEndDate] = useState('')
@@ -203,6 +209,8 @@ export default function Home() {
   const [manualError, setManualError] = useState<string | null>(null)
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
   const [refreshing, setRefreshing] = useState(false)
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState(25)
 
   const {
     data: execData,
@@ -237,6 +245,17 @@ export default function Home() {
     }
   }, [execData, extraExecutions.length])
 
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [
+    statusFilter,
+    workflowFilter,
+    selectedModes,
+    dateFilter,
+    customStartDate,
+    customEndDate,
+  ])
+
   const baseExecutions = useMemo(() => {
     return execData?.data || []
   }, [execData])
@@ -264,6 +283,65 @@ export default function Home() {
     return map
   }, [workflowData])
 
+  const modeOptions = useMemo(() => {
+    const modes = Array.from(
+      new Set(
+        executions
+          .map(ex => normalizeMode(ex.mode))
+          .filter(Boolean)
+      )
+    ) as string[]
+
+    return modes.sort((a, b) => a.localeCompare(b))
+  }, [executions])
+
+  const activeSelectedModes = useMemo(() => {
+    return selectedModes === null ? modeOptions : selectedModes
+  }, [selectedModes, modeOptions])
+
+  const allModesSelected =
+    modeOptions.length > 0 &&
+    activeSelectedModes.length === modeOptions.length &&
+    modeOptions.every(mode => activeSelectedModes.includes(mode))
+
+  const modeFilterLabel = useMemo(() => {
+    if (modeOptions.length === 0) return 'No Modes'
+
+    if (allModesSelected) return 'All Modes'
+
+    if (activeSelectedModes.length === 0) return 'No Modes Selected'
+
+    if (activeSelectedModes.length === 1) {
+      return formatModeLabel(activeSelectedModes[0])
+    }
+
+    return activeSelectedModes
+      .map(mode => formatModeLabel(mode))
+      .join(', ')
+  }, [activeSelectedModes, allModesSelected, modeOptions.length])
+
+  const hasModeFilter = !allModesSelected
+
+  const toggleMode = (mode: string) => {
+    setSelectedModes(current => {
+      const currentModes = current === null ? modeOptions : current
+
+      if (currentModes.includes(mode)) {
+        return currentModes.filter(item => item !== mode)
+      }
+
+      return [...currentModes, mode].sort((a, b) => a.localeCompare(b))
+    })
+  }
+
+  const selectAllModes = () => {
+    setSelectedModes(null)
+  }
+
+  const clearAllModes = () => {
+    setSelectedModes([])
+  }
+
   const dateFilteredExecutions = useMemo(() => {
     return executions.filter(ex =>
       matchesDateFilter(ex.startedAt, dateFilter, customStartDate, customEndDate)
@@ -277,16 +355,33 @@ export default function Home() {
   }, [dateFilteredExecutions, workflowFilter])
 
   const modeScopedExecutions = useMemo(() => {
-    return workflowScopedExecutions.filter(
-      ex => modeFilter === 'all' || ex.mode === modeFilter
-    )
-  }, [workflowScopedExecutions, modeFilter])
+    return workflowScopedExecutions.filter(ex => {
+      const mode = normalizeMode(ex.mode)
+
+      if (!mode) return false
+      if (activeSelectedModes.length === 0) return false
+
+      return activeSelectedModes.includes(mode)
+    })
+  }, [workflowScopedExecutions, activeSelectedModes])
 
   const filtered = useMemo(() => {
     return modeScopedExecutions.filter(
       ex => statusFilter === 'all' || ex.status === statusFilter
     )
   }, [modeScopedExecutions, statusFilter])
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize))
+  const safeCurrentPage = Math.min(currentPage, totalPages)
+  const paginationStart = filtered.length === 0 ? 0 : (safeCurrentPage - 1) * pageSize
+  const paginationEnd = Math.min(safeCurrentPage * pageSize, filtered.length)
+
+  const paginatedExecutions = useMemo(() => {
+    const start = (safeCurrentPage - 1) * pageSize
+    const end = start + pageSize
+
+    return filtered.slice(start, end)
+  }, [filtered, safeCurrentPage, pageSize])
 
   const total = modeScopedExecutions.length
 
@@ -389,19 +484,16 @@ export default function Home() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [executions, workflowMap])
 
-  const modeOptions = useMemo(() => {
-    const modes = Array.from(
-      new Set(executions.map(ex => ex.mode).filter(Boolean))
-    ) as string[]
-
-    return modes.sort((a, b) => a.localeCompare(b))
-  }, [executions])
-
   const workflowBreakdownSource = useMemo(() => {
-    return dateFilteredExecutions.filter(
-      ex => modeFilter === 'all' || ex.mode === modeFilter
-    )
-  }, [dateFilteredExecutions, modeFilter])
+    return dateFilteredExecutions.filter(ex => {
+      const mode = normalizeMode(ex.mode)
+
+      if (!mode) return false
+      if (activeSelectedModes.length === 0) return false
+
+      return activeSelectedModes.includes(mode)
+    })
+  }, [dateFilteredExecutions, activeSelectedModes])
 
   const workflowBreakdown = useMemo(() => {
     return Object.entries(
@@ -474,6 +566,7 @@ export default function Home() {
     setManualError(null)
     setExtraExecutions([])
     setNextCursor(null)
+    setCurrentPage(1)
 
     try {
       await Promise.all([
@@ -492,11 +585,13 @@ export default function Home() {
 
   const clearFilters = () => {
     setWorkflowFilter('all')
-    setModeFilter('all')
+    setSelectedModes(null)
+    setModeMenuOpen(false)
     setDateFilter('all')
     setCustomStartDate('')
     setCustomEndDate('')
     setStatusFilter('all')
+    setCurrentPage(1)
   }
 
   const errorMessage = execError
@@ -534,8 +629,8 @@ export default function Home() {
             Showing {filtered.length} of {executions.length} loaded executions
             {dateFilter !== 'all' &&
               ` · Date filter: ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
-            {modeFilter !== 'all' &&
-              ` · Mode: ${formatModeLabel(modeFilter)}`}
+            {hasModeFilter &&
+              ` · Modes: ${modeFilterLabel}`}
             {loadingWorkflows && ' · Loading workflow names...'}
             {' · '}
             Last updated {formatLastUpdated(lastUpdated)}
@@ -635,8 +730,8 @@ export default function Home() {
               Top 5 most active workflows from the current loaded executions
               {dateFilter !== 'all' &&
                 ` filtered by ${getDateFilterLabel(dateFilter, customStartDate, customEndDate)}`}
-              {modeFilter !== 'all' &&
-                ` · Mode: ${formatModeLabel(modeFilter)}`}
+              {hasModeFilter &&
+                ` · Modes: ${modeFilterLabel}`}
               .
             </p>
           </div>
@@ -715,19 +810,78 @@ export default function Home() {
           ))}
         </select>
 
-        <select
-          value={modeFilter}
-          onChange={e => setModeFilter(e.target.value)}
-          className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
-        >
-          <option value="all">All Modes</option>
+        {/* Mode Multi-Select */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => setModeMenuOpen(open => !open)}
+            className="flex min-w-[150px] items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 transition-colors hover:border-gray-300 focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:border-gray-600 dark:focus:ring-gray-700"
+          >
+            <span className="truncate">{modeFilterLabel}</span>
+            <span className="text-xs text-gray-400">
+              {modeMenuOpen ? '▲' : '▼'}
+            </span>
+          </button>
 
-          {modeOptions.map(mode => (
-            <option key={mode} value={mode}>
-              {formatModeLabel(mode)}
-            </option>
-          ))}
-        </select>
+          {modeMenuOpen && (
+            <div className="absolute left-0 z-30 mt-2 w-64 rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-700 dark:bg-gray-900">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                  Filter by mode
+                </p>
+
+                <button
+                  type="button"
+                  onClick={() => setModeMenuOpen(false)}
+                  className="text-xs text-gray-400 hover:text-gray-700 dark:hover:text-gray-200"
+                >
+                  Close
+                </button>
+              </div>
+
+              <div className="mb-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={selectAllModes}
+                  className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  Select all
+                </button>
+
+                <button
+                  type="button"
+                  onClick={clearAllModes}
+                  className="rounded-lg border border-gray-200 px-2.5 py-1 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                >
+                  Clear
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {modeOptions.length === 0 ? (
+                  <p className="text-sm text-gray-400 dark:text-gray-500">
+                    No modes available
+                  </p>
+                ) : (
+                  modeOptions.map(mode => (
+                    <label
+                      key={mode}
+                      className="flex cursor-pointer items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-800"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={activeSelectedModes.includes(mode)}
+                        onChange={() => toggleMode(mode)}
+                        className="h-4 w-4 rounded border-gray-300 text-gray-900 focus:ring-gray-400 dark:border-gray-600 dark:bg-gray-800"
+                      />
+                      <span>{formatModeLabel(mode)}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
         {dateFilter === 'custom' && (
           <div className="flex flex-wrap items-center gap-2">
@@ -753,7 +907,7 @@ export default function Home() {
 
         {(workflowFilter !== 'all' ||
           dateFilter !== 'all' ||
-          modeFilter !== 'all' ||
+          hasModeFilter ||
           statusFilter !== 'all') && (
             <button
               onClick={clearFilters}
@@ -830,14 +984,14 @@ export default function Home() {
                 </td>
               </tr>
             ) : (
-              filtered.map((ex, index) => {
+              paginatedExecutions.map((ex, index) => {
                 const executionUrl = getN8nExecutionUrl(ex)
                 const workflowName =
                   workflowMap[ex.workflowId] || ex.workflowId || 'Unknown Workflow'
 
                 return (
                   <tr
-                    key={`${ex.id}-${index}`}
+                    key={`${ex.id}-${paginationStart + index}`}
                     className={`transition-colors ${ex.status === 'error'
                         ? 'bg-red-50 hover:bg-red-100 dark:bg-red-950/30 dark:hover:bg-red-950/50'
                         : ex.status === 'waiting'
@@ -913,6 +1067,56 @@ export default function Home() {
         </table>
       </div>
 
+      {/* Local Pagination */}
+      {filtered.length > 0 && (
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <p className="text-sm text-gray-400 dark:text-gray-500">
+            Showing {paginationStart + 1}–{paginationEnd} of {filtered.length} filtered executions
+            {' '}
+            <span className="text-gray-300 dark:text-gray-600">
+              ({executions.length} loaded)
+            </span>
+          </p>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={pageSize}
+              onChange={e => {
+                setPageSize(Number(e.target.value))
+                setCurrentPage(1)
+              }}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-700 transition-colors focus:outline-none focus:ring-2 focus:ring-gray-300 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:focus:ring-gray-700"
+            >
+              {PAGE_SIZE_OPTIONS.map(size => (
+                <option key={size} value={size}>
+                  {size} rows
+                </option>
+              ))}
+            </select>
+
+            <button
+              onClick={() => setCurrentPage(page => Math.max(1, page - 1))}
+              disabled={safeCurrentPage === 1}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              Previous
+            </button>
+
+            <span className="px-2 text-sm text-gray-500 dark:text-gray-400">
+              Page {safeCurrentPage} of {totalPages}
+            </span>
+
+            <button
+              onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))}
+              disabled={safeCurrentPage === totalPages}
+              className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:cursor-not-allowed disabled:opacity-40 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-200 dark:hover:bg-gray-800"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
+
       {nextCursor && (
         <div className="mt-6 text-center">
           <button
@@ -920,14 +1124,14 @@ export default function Home() {
             disabled={loadingMore}
             className="rounded-lg bg-gray-900 px-6 py-2.5 text-sm font-medium text-white transition-colors hover:bg-gray-700 disabled:opacity-50 dark:bg-white dark:text-gray-950 dark:hover:bg-gray-200"
           >
-            {loadingMore ? 'Loading...' : 'Load More'}
+            {loadingMore ? 'Loading...' : `Load next ${INITIAL_LIMIT} from n8n`}
           </button>
         </div>
       )}
 
       {!nextCursor && executions.length > 0 && (
         <p className="mt-6 text-center text-sm text-gray-300 dark:text-gray-600">
-          All {executions.length} executions loaded
+          All {executions.length} loaded executions have been fetched
         </p>
       )}
     </div>
