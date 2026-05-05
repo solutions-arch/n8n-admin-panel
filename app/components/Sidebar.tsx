@@ -9,8 +9,8 @@ const navItems = [
     { label: 'Executions', href: '/', icon: '⚡' },
     { label: 'Workflows', href: '/workflows', icon: '📋' },
     { label: 'Operations', href: '/operations', icon: '📊' },
+    { label: 'Bug Logs', href: '/bug-logs', icon: '🐞' },
 ]
-
 export default function Sidebar() {
     const pathname = usePathname()
 
@@ -39,8 +39,8 @@ export default function Sidebar() {
                             key={item.href}
                             href={item.href}
                             className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm mb-1 transition-colors ${isActive
-                                    ? 'bg-gray-700 text-white'
-                                    : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                                ? 'bg-gray-700 text-white'
+                                : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                                 }`}
                         >
                             <span>{item.icon}</span>

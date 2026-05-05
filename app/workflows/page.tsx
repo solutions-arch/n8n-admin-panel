@@ -64,23 +64,28 @@ function formatDate(value: string | null | undefined) {
     })
 }
 
-function getTagNames(workflow: any) {
+type WorkflowTag = string | {
+    name?: string
+    tagName?: string
+}
+
+function getTagNames(workflow: any): string[] {
     if (!Array.isArray(workflow.tags)) return []
 
     return workflow.tags
-        .map((tag: any) => {
+        .map((tag: WorkflowTag) => {
             if (typeof tag === 'string') return tag
-            return tag?.name || tag?.tagName || ''
+            return tag.name || tag.tagName || ''
         })
-        .filter(Boolean)
+        .filter((tag: string) => Boolean(tag))
 }
 
-function normalizeTag(tag: string) {
+function normalizeTag(tag: string): string {
     return tag.trim().toLowerCase()
 }
 
-function hasTag(workflow: any, tagName: string) {
-    const tags = getTagNames(workflow).map(tag => normalizeTag(tag))
+function hasTag(workflow: any, tagName: string): boolean {
+    const tags = getTagNames(workflow).map((tag: string) => normalizeTag(tag))
     return tags.includes(normalizeTag(tagName))
 }
 
