@@ -337,6 +337,7 @@ export default function WorkflowsPage() {
     const [versionLoadingId, setVersionLoadingId] = useState<string | null>(null)
     const [versionError, setVersionError] = useState<Record<string, string>>({})
 
+
     const loadWorkflows = async () => {
         setRefreshing(true)
         setErrorMessage(null)
@@ -643,7 +644,16 @@ export default function WorkflowsPage() {
                 const name = String(workflow.name || '').toLowerCase()
                 const id = String(workflow.id || '').toLowerCase()
                 const tags = getTagNames(workflow).join(' ').toLowerCase()
-                const projects = getProjectTagsFromWorkflow(workflow).join(' ').toLowerCase()
+                const projectMetadata = [
+                    workflow.automation_project_name,
+                    workflow.automation_project_slug,
+                    workflow.project_implementation_stage,
+                    workflow.n8n_folder_id,
+                    workflow.n8n_folder_url,
+                ]
+                    .filter(Boolean)
+                    .join(' ')
+                    .toLowerCase()
                 const versionId = String(getVersionId(workflow) || '').toLowerCase()
                 const description = String(
                     getWorkflowDescription(workflow, versionDetails[workflow.id]) || ''
@@ -656,7 +666,7 @@ export default function WorkflowsPage() {
                     name.includes(query) ||
                     id.includes(query) ||
                     tags.includes(query) ||
-                    projects.includes(query) ||
+                    projectMetadata.includes(query) ||
                     versionId.includes(query) ||
                     description.includes(query) ||
                     versionAuthors.includes(query)
