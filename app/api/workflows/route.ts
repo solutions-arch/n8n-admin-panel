@@ -10,28 +10,32 @@ export async function GET() {
         const { data, error } = await supabaseAdmin
             .from('workflow_registry')
             .select(
-                `
-                workflow_id,
-                workflow_name,
-                active,
-                archived,
-                owner_project_id,
-                version_id,
-                last_modified_by,
-                version_created_at,
-                workflow_created_at,
-                workflow_updated_at,
-                synced_at,
-                description,
-                tags,
-                automation_project_id,
-                automation_project_name,
-                automation_project_slug,
-                project_implementation_stage,
-                n8n_folder_id,
-                n8n_folder_url
-                `
-            )
+    `
+    workflow_id,
+    workflow_name,
+    active,
+    archived,
+    owner_project_id,
+    version_id,
+    last_modified_by,
+    version_created_at,
+    workflow_created_at,
+    workflow_updated_at,
+    synced_at,
+    description,
+    tags,
+    automation_project_id,
+    automation_project_name,
+    automation_project_slug,
+    project_implementation_stage,
+    n8n_folder_id,
+    n8n_folder_url,
+    automation_type,
+    lifecycle_stage,
+    business_owner,
+    operational_notes
+    `
+)
             .order('workflow_updated_at', {
                 ascending: false,
                 nullsFirst: false,
@@ -73,6 +77,11 @@ export async function GET() {
             project_implementation_stage: row.project_implementation_stage,
             n8n_folder_id: row.n8n_folder_id,
             n8n_folder_url: row.n8n_folder_url,
+
+            automation_type: row.automation_type,
+lifecycle_stage: row.lifecycle_stage,
+business_owner: row.business_owner,
+operational_notes: row.operational_notes,
         }))
 
         return NextResponse.json(

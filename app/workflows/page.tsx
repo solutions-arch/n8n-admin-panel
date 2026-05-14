@@ -331,6 +331,7 @@ export default function WorkflowsPage() {
     const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
     const [actionLoading, setActionLoading] = useState<string | null>(null)
     const [projectUpdatingId, setProjectUpdatingId] = useState<string | null>(null)
+    const [metadataUpdatingId, setMetadataUpdatingId] = useState<string | null>(null)
 
     const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null)
     const [versionDetails, setVersionDetails] = useState<Record<string, any>>({})
@@ -479,6 +480,53 @@ export default function WorkflowsPage() {
             console.error('Failed to assign workflow project:', error)
         } finally {
             setProjectUpdatingId(null)
+        }
+    }
+
+    const updateWorkflowMetadata = async (
+        workflowId: string,
+        updates: {
+            automation_type?: string | null
+            lifecycle_stage?: string | null
+            business_owner?: string | null
+            operational_notes?: string | null
+        }
+    ) => {
+        setMetadataUpdatingId(workflowId)
+
+        try {
+            const res = await fetch(`/api/workflows/${workflowId}/metadata`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updates),
+            })
+
+            if (!res.ok) {
+                const text = await res.text()
+                console.error('Failed to update workflow metadata:', text)
+                return
+            }
+
+            const result = await res.json()
+            const updatedMetadata = result.data
+
+            setWorkflows(prev =>
+                prev.map(workflow =>
+                    workflow.id === workflowId
+                        ? {
+                            ...workflow,
+                            automation_type: updatedMetadata.automation_type,
+                            lifecycle_stage: updatedMetadata.lifecycle_stage,
+                            business_owner: updatedMetadata.business_owner,
+                            operational_notes: updatedMetadata.operational_notes,
+                        }
+                        : workflow
+                )
+            )
+        } catch (error) {
+            console.error('Failed to update workflow metadata:', error)
+        } finally {
+            setMetadataUpdatingId(null)
         }
     }
 
@@ -1332,6 +1380,103 @@ export default function WorkflowsPage() {
                                                             <p className="mt-1 whitespace-pre-line text-sm text-gray-600 dark:text-gray-300">
                                                                 {description || 'No description added yet.'}
                                                             </p>
+                                                        </div>
+
+                                                        <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800">
+                                                            <div className="mb-3 flex items-center justify-between gap-3">
+                                                                <div>
+                                                                    <p className="text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                                                        Operational Metadata
+                                                                    </p>
+                                                                    <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                                                                        Supabase-managed classification and internal workflow context.
+                                                                    </p>
+                                                                </div>
+
+                                                                {metadataUpdatingId === workflow.id && (
+                                                                    <span className="text-xs text-blue-500">
+                                                                        Saving...
+                                                                    </span>
+                                                                )}
+                                                            </div>
+
+                                                            <div className="grid gap-3 md:grid-cols-3">
+                                                                <select
+                                                                    value={workflow.automation_type || ''}
+                                                                    disabled={metadataUpdatingId === workflow.id}
+                                                                    onChange={event =>
+                                                                        updateWorkflowMetadata(workflow.id, {
+                                                                            automation_type: event.target.value || null,
+                                                                        })
+                                                                    }
+                                                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                >
+                                                                    <option value="">Type: Not set</option>
+                                                                    <option value="Workflow">Workflow</option>
+                                                                    <option value="AI Agent">AI Agent</option>
+                                                                </select>
+
+                                                                <select
+                                                                    value={workflow.lifecycle_stage || ''}
+                                                                    disabled={metadataUpdatingId === workflow.id}
+                                                                    onChange={event =>
+                                                                        updateWorkflowMetadata(workflow.id, {
+                                                                            lifecycle_stage: event.target.value || null,
+                                                                        })
+                                                                    }
+                                                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                >
+                                                                    <option value="">Stage: Not set</option>
+                                                                    <option value="Production">Production</option>
+                                                                    <option value="Development">Development</option>
+                                                                    <option value="Paused/Retired">Paused/Retired</option>
+                                                                    <option value="Ad hoc">Ad hoc</option>
+                                                                </select>
+
+                                                                <input
+                                                                    type="text"
+                                                                    value={workflow.business_owner || ''}
+                                                                    disabled={metadataUpdatingId === workflow.id}
+                                                                    onChange={event =>
+                                                                        setWorkflows(prev =>
+                                                                            prev.map(item =>
+                                                                                item.id === workflow.id
+                                                                                    ? { ...item, business_owner: event.target.value }
+                                                                                    : item
+                                                                            )
+                                                                        )
+                                                                    }
+                                                                    onBlur={event =>
+                                                                        updateWorkflowMetadata(workflow.id, {
+                                                                            business_owner: event.target.value || null,
+                                                                        })
+                                                                    }
+                                                                    placeholder="Business owner"
+                                                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                />
+                                                            </div>
+
+                                                            <textarea
+                                                                value={workflow.operational_notes || ''}
+                                                                disabled={metadataUpdatingId === workflow.id}
+                                                                onChange={event =>
+                                                                    setWorkflows(prev =>
+                                                                        prev.map(item =>
+                                                                            item.id === workflow.id
+                                                                                ? { ...item, operational_notes: event.target.value }
+                                                                                : item
+                                                                        )
+                                                                    )
+                                                                }
+                                                                onBlur={event =>
+                                                                    updateWorkflowMetadata(workflow.id, {
+                                                                        operational_notes: event.target.value || null,
+                                                                    })
+                                                                }
+                                                                placeholder="Operational notes, dependencies, risks, reminders, or handoff context..."
+                                                                rows={3}
+                                                                className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                            />
                                                         </div>
 
                                                         {versionError[workflow.id] && (
