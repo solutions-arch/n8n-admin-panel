@@ -25,6 +25,15 @@ type StageFilter =
 
 type ProjectFilter = string
 
+type AutomationProject = {
+    automation_project_id: string
+    project_name: string
+    project_slug: string
+    implementation_stage: string | null
+    n8n_folder_id: string | null
+    n8n_folder_url: string | null
+}
+
 const TYPE_TAGS = ['Workflow', 'AI Agent']
 const STAGE_TAGS = ['Production', 'Development', 'Paused/Retired', 'Ad hoc']
 const PAGE_SIZE_OPTIONS = [10, 15, 25, 50]
@@ -303,6 +312,7 @@ function CompactMetricCard({
 
 export default function WorkflowsPage() {
     const [workflows, setWorkflows] = useState<any[]>([])
+    const [automationProjects, setAutomationProjects] = useState<AutomationProject[]>([])
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -320,6 +330,7 @@ export default function WorkflowsPage() {
 
     const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
     const [actionLoading, setActionLoading] = useState<string | null>(null)
+    const [projectUpdatingId, setProjectUpdatingId] = useState<string | null>(null)
 
     const [expandedWorkflowId, setExpandedWorkflowId] = useState<string | null>(null)
     const [versionDetails, setVersionDetails] = useState<Record<string, any>>({})
@@ -331,9 +342,13 @@ export default function WorkflowsPage() {
         setErrorMessage(null)
 
         try {
-            const data = await fetchJson('/api/workflows')
+            const [workflowData, projectData] = await Promise.all([
+                fetchJson('/api/workflows'),
+                fetchJson('/api/automation-projects'),
+            ])
 
-            setWorkflows(data.data || [])
+            setWorkflows(workflowData.data || [])
+            setAutomationProjects(projectData.data || [])
             setLastRefreshed(new Date())
 
             setVersionDetails({})
@@ -414,6 +429,58 @@ export default function WorkflowsPage() {
         }
     }
 
+    const assignWorkflowProject = async (
+        workflowId: string,
+        nextProjectId: string | null,
+        workflowName: string
+    ) => {
+        setProjectUpdatingId(workflowId)
+
+        try {
+            const res = await fetch(`/api/workflows/${workflowId}/project`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    automation_project_id: nextProjectId,
+                    workflow_name: workflowName,
+                }),
+            })
+
+            if (!res.ok) {
+                const text = await res.text()
+                console.error('Failed to assign workflow project:', text)
+                return
+            }
+
+            const selectedProject = automationProjects.find(
+                project => project.automation_project_id === nextProjectId
+            )
+
+            setWorkflows(prev =>
+                prev.map(workflow =>
+                    workflow.id === workflowId
+                        ? {
+                            ...workflow,
+                            automation_project_id: nextProjectId,
+                            automation_project_name:
+                                selectedProject?.project_name || null,
+                            automation_project_slug:
+                                selectedProject?.project_slug || null,
+                            project_implementation_stage:
+                                selectedProject?.implementation_stage || null,
+                            n8n_folder_id: selectedProject?.n8n_folder_id || null,
+                            n8n_folder_url: selectedProject?.n8n_folder_url || null,
+                        }
+                        : workflow
+                )
+            )
+        } catch (error) {
+            console.error('Failed to assign workflow project:', error)
+        } finally {
+            setProjectUpdatingId(null)
+        }
+    }
+
     const loadVersionDetails = async (workflow: any) => {
         const workflowId = workflow.id
         const versionId = getVersionId(workflow)
@@ -490,15 +557,28 @@ export default function WorkflowsPage() {
     }
 
     const allProjects = useMemo(() => {
-        return getAllProjects(workflows)
-    }, [workflows])
+        return [...automationProjects].sort((a, b) =>
+            a.project_name.localeCompare(b.project_name)
+        )
+    }, [automationProjects])
+
+    const selectedProjectLabel = useMemo(() => {
+        if (projectFilter === 'all') return 'All'
+        if (projectFilter === 'unassigned') return 'Unassigned'
+
+        return (
+            automationProjects.find(
+                project => project.automation_project_id === projectFilter
+            )?.project_name || 'Selected project'
+        )
+    }, [automationProjects, projectFilter])
 
     const projectScopedWorkflows = useMemo(() => {
         return workflows.filter(workflow => {
             if (projectFilter === 'all') return true
-            if (projectFilter === 'uncategorized') return isUncategorizedWorkflow(workflow)
+            if (projectFilter === 'unassigned') return !workflow.automation_project_id
 
-            return workflowHasProject(workflow, projectFilter)
+            return workflow.automation_project_id === projectFilter
         })
     }, [workflows, projectFilter])
 
@@ -688,11 +768,7 @@ export default function WorkflowsPage() {
 
                     <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
                         Showing {filteredWorkflows.length} of {projectScopedWorkflows.length} workflows
-                        {projectFilter !== 'all' &&
-                            ` · Project: ${projectFilter === 'uncategorized'
-                                ? 'Uncategorized'
-                                : projectFilter
-                            }`}
+                        {projectFilter !== 'all' && ` · Project: ${selectedProjectLabel}`}
                         {typeFilter !== 'all' && ` · Type: ${typeFilter}`}
                         {stageFilter !== 'all' && ` · Stage: ${stageFilter}`}
                         {lastRefreshed &&
@@ -750,12 +826,15 @@ export default function WorkflowsPage() {
                         <option value="all">Project: All</option>
 
                         {allProjects.map(project => (
-                            <option key={project} value={project}>
-                                Project: {project}
+                            <option
+                                key={project.automation_project_id}
+                                value={project.automation_project_id}
+                            >
+                                Project: {project.project_name}
                             </option>
                         ))}
 
-                        <option value="uncategorized">Project: Uncategorized</option>
+                        <option value="unassigned">Project: Unassigned</option>
                     </select>
 
                     {(searchQuery ||
@@ -967,11 +1046,15 @@ export default function WorkflowsPage() {
 
             <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm dark:border-gray-800 dark:bg-gray-900">
                 <div className="overflow-x-auto">
-                    <table className="w-full min-w-[950px] text-sm">
+                    <table className="w-full min-w-[1100px] text-sm">
                         <thead>
                             <tr className="border-b border-gray-100 bg-gray-50 dark:border-gray-800 dark:bg-gray-900/80">
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
                                     Workflow
+                                </th>
+
+                                <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                                    Project
                                 </th>
 
                                 <th className="p-4 text-left text-xs font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
@@ -1022,6 +1105,38 @@ export default function WorkflowsPage() {
                                                 <p className="mt-1 font-mono text-xs text-gray-300 dark:text-gray-600">
                                                     {workflow.id}
                                                 </p>
+                                            </td>
+
+                                            <td className="p-4">
+                                                <select
+                                                    value={workflow.automation_project_id || ''}
+                                                    disabled={projectUpdatingId === workflow.id}
+                                                    onChange={event =>
+                                                        assignWorkflowProject(
+                                                            workflow.id,
+                                                            event.target.value || null,
+                                                            workflow.name
+                                                        )
+                                                    }
+                                                    className="w-full min-w-[190px] rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
+                                                >
+                                                    <option value="">Unassigned</option>
+
+                                                    {allProjects.map(project => (
+                                                        <option
+                                                            key={project.automation_project_id}
+                                                            value={project.automation_project_id}
+                                                        >
+                                                            {project.project_name}
+                                                        </option>
+                                                    ))}
+                                                </select>
+
+                                                {workflow.n8n_folder_id && (
+                                                    <p className="mt-1 font-mono text-[11px] text-gray-300 dark:text-gray-600">
+                                                        {workflow.n8n_folder_id}
+                                                    </p>
+                                                )}
                                             </td>
 
                                             <td className="p-4">
@@ -1128,7 +1243,7 @@ export default function WorkflowsPage() {
                                         {isExpanded && (
                                             <tr>
                                                 <td
-                                                    colSpan={5}
+                                                    colSpan={6}
                                                     className="bg-gray-50 p-4 dark:bg-gray-950/60"
                                                 >
                                                     <div className="rounded-lg border border-gray-100 bg-white p-4 text-sm dark:border-gray-800 dark:bg-gray-900">
@@ -1225,7 +1340,7 @@ export default function WorkflowsPage() {
                             {filteredWorkflows.length === 0 && (
                                 <tr>
                                     <td
-                                        colSpan={5}
+                                        colSpan={6}
                                         className="p-8 text-center text-sm text-gray-400 dark:text-gray-500"
                                     >
                                         No workflows found for this search or filter.

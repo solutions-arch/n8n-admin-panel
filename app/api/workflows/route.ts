@@ -1,6 +1,19 @@
 // app/api/workflows/route.ts
 
 import { NextResponse } from 'next/server'
+import { supabaseAdmin } from '@/lib/supabaseAdmin'
+
+export const dynamic = 'force-dynamic'
+
+async function parseResponse(response: Response) {
+    const text = await response.text()
+
+    try {
+        return text ? JSON.parse(text) : {}
+    } catch {
+        return { raw: text }
+    }
+}
 
 export async function GET() {
     try {
@@ -14,14 +27,12 @@ export async function GET() {
             )
         }
 
+        const cleanBaseUrl = baseUrl.replace(/\/$/, '')
+
         const allWorkflows: any[] = []
         let cursor: string | null = null
         let page = 0
 
-        /**
-         * n8n supports a maximum limit of 250 per page.
-         * We loop through pages using nextCursor until all workflows are fetched.
-         */
         const limit = '250'
         const maxPages = 50
 
@@ -33,24 +44,19 @@ export async function GET() {
                 params.set('cursor', cursor)
             }
 
-            const response = await fetch(`${baseUrl}/workflows?${params.toString()}`, {
-                method: 'GET',
-                headers: {
-                    'X-N8N-API-KEY': apiKey,
-                    'Content-Type': 'application/json',
-                },
-                cache: 'no-store',
-            })
+            const response = await fetch(
+                `${cleanBaseUrl}/workflows?${params.toString()}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'X-N8N-API-KEY': apiKey,
+                        Accept: 'application/json',
+                    },
+                    cache: 'no-store',
+                }
+            )
 
-            const text = await response.text()
-
-            let data: any = {}
-
-            try {
-                data = text ? JSON.parse(text) : {}
-            } catch {
-                data = { raw: text }
-            }
+            const data = await parseResponse(response)
 
             if (!response.ok) {
                 return NextResponse.json(
@@ -70,10 +76,63 @@ export async function GET() {
             page += 1
         } while (cursor && page < maxPages)
 
+        const workflowIds = allWorkflows
+            .map(workflow => workflow.id)
+            .filter(Boolean)
+
+        let registryByWorkflowId: Record<string, any> = {}
+
+        if (workflowIds.length > 0) {
+            const { data: registryRows, error: registryError } = await supabaseAdmin
+                .from('workflow_registry')
+                .select(
+                    `
+                    workflow_id,
+                    automation_project_id,
+                    automation_project_name,
+                    automation_project_slug,
+                    project_implementation_stage,
+                    n8n_folder_id,
+                    n8n_folder_url
+                    `
+                )
+                .in('workflow_id', workflowIds)
+
+            if (registryError) {
+                return NextResponse.json(
+                    {
+                        error: 'Failed to fetch workflow registry metadata',
+                        detail: registryError.message,
+                    },
+                    { status: 500 }
+                )
+            }
+
+            registryByWorkflowId = Object.fromEntries(
+                (registryRows || []).map(row => [row.workflow_id, row])
+            )
+        }
+
+        const enrichedWorkflows = allWorkflows.map(workflow => {
+            const registry = registryByWorkflowId[workflow.id]
+
+            return {
+                ...workflow,
+
+                automation_project_id: registry?.automation_project_id || null,
+                automation_project_name: registry?.automation_project_name || null,
+                automation_project_slug: registry?.automation_project_slug || null,
+                project_implementation_stage:
+                    registry?.project_implementation_stage || null,
+                n8n_folder_id: registry?.n8n_folder_id || null,
+                n8n_folder_url: registry?.n8n_folder_url || null,
+            }
+        })
+
         return NextResponse.json(
             {
-                data: allWorkflows,
-                count: allWorkflows.length,
+                data: enrichedWorkflows,
+                count: enrichedWorkflows.length,
                 nextCursor: null,
                 truncated: Boolean(cursor),
             },
