@@ -34,6 +34,23 @@ type AutomationProject = {
     n8n_folder_url: string | null
 }
 
+type AutomationFunction = {
+    function_id: string
+    function_name: string
+    function_slug: string
+    description: string | null
+    active: boolean
+    sort_order: number
+}
+
+type AutomationRole = {
+    role_id: string
+    role_name: string
+    role_slug: string
+    active: boolean
+    sort_order: number
+}
+
 const TYPE_TAGS = ['Workflow', 'AI Agent']
 const STAGE_TAGS = ['Production', 'Development', 'Paused/Retired', 'Ad hoc']
 const PAGE_SIZE_OPTIONS = [10, 15, 25, 50]
@@ -76,6 +93,15 @@ function formatDate(value: string | null | undefined) {
 type WorkflowTag = string | {
     name?: string
     tagName?: string
+}
+
+type AutomationBusinessUnit = {
+    business_unit_id: string
+    business_unit_name: string
+    business_unit_slug: string
+    description: string | null
+    active: boolean
+    sort_order: number
 }
 
 function getTagNames(workflow: any): string[] {
@@ -310,9 +336,114 @@ function CompactMetricCard({
     )
 }
 
+function SupportedRolesDropdown({
+    roles,
+    selectedRoleIds,
+    disabled,
+    onChange,
+}: {
+    roles: AutomationRole[]
+    selectedRoleIds: string[]
+    disabled?: boolean
+    onChange: (nextRoleIds: string[]) => void
+}) {
+    const [open, setOpen] = useState(false)
+
+    const selectedRoles = roles.filter(role =>
+        selectedRoleIds.includes(role.role_id)
+    )
+
+    const toggleRole = (roleId: string) => {
+        if (selectedRoleIds.includes(roleId)) {
+            onChange(selectedRoleIds.filter(id => id !== roleId))
+        } else {
+            onChange(Array.from(new Set([...selectedRoleIds, roleId])))
+        }
+    }
+
+    return (
+        <div className="relative">
+            <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setOpen(prev => !prev)}
+                className="flex w-full items-center justify-between rounded-lg border border-gray-200 bg-white px-3 py-2 text-left text-xs text-gray-700 outline-none transition hover:bg-gray-50 focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:hover:bg-gray-900"
+            >
+                <span className="truncate">
+                    {selectedRoles.length === 0
+                        ? 'Select supported roles'
+                        : `${selectedRoles.length} role${selectedRoles.length === 1 ? '' : 's'} selected`}
+                </span>
+
+                <span className="text-gray-400">
+                    {open ? '▲' : '▼'}
+                </span>
+            </button>
+
+            {open && (
+                <div className="absolute z-20 mt-2 max-h-72 w-full overflow-y-auto rounded-lg border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-950">
+                    <div className="mb-2 flex items-center justify-between border-b border-gray-100 pb-2 dark:border-gray-800">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 dark:text-gray-500">
+                            Supported Roles
+                        </span>
+
+                        {selectedRoleIds.length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => onChange([])}
+                                className="text-[11px] font-medium text-blue-600 hover:text-blue-700 dark:text-blue-400"
+                            >
+                                Clear
+                            </button>
+                        )}
+                    </div>
+
+                    <div className="space-y-1">
+                        {roles.map(role => {
+                            const checked = selectedRoleIds.includes(role.role_id)
+
+                            return (
+                                <label
+                                    key={role.role_id}
+                                    className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-gray-700 hover:bg-gray-50 dark:text-gray-200 dark:hover:bg-gray-900"
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={() => toggleRole(role.role_id)}
+                                        className="h-3.5 w-3.5 rounded border-gray-300"
+                                    />
+
+                                    <span>{role.role_name}</span>
+                                </label>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {selectedRoles.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                    {selectedRoles.map(role => (
+                        <span
+                            key={role.role_id}
+                            className="rounded-full bg-gray-100 px-2 py-1 text-[11px] text-gray-600 dark:bg-gray-800 dark:text-gray-300"
+                        >
+                            {role.role_name}
+                        </span>
+                    ))}
+                </div>
+            )}
+        </div>
+    )
+}
+
 export default function WorkflowsPage() {
     const [workflows, setWorkflows] = useState<any[]>([])
     const [automationProjects, setAutomationProjects] = useState<AutomationProject[]>([])
+    const [automationFunctions, setAutomationFunctions] = useState<AutomationFunction[]>([])
+    const [automationRoles, setAutomationRoles] = useState<AutomationRole[]>([])
+    const [automationBusinessUnits, setAutomationBusinessUnits] = useState<AutomationBusinessUnit[]>([])
     const [loading, setLoading] = useState(true)
     const [refreshing, setRefreshing] = useState(false)
     const [errorMessage, setErrorMessage] = useState<string | null>(null)
@@ -344,14 +475,19 @@ export default function WorkflowsPage() {
         setErrorMessage(null)
 
         try {
-            const [workflowData, projectData] = await Promise.all([
+            const [workflowData, projectData, functionData, roleData, businessUnitData] = await Promise.all([
                 fetchJson('/api/workflows'),
                 fetchJson('/api/automation-projects'),
+                fetchJson('/api/automation-functions'),
+                fetchJson('/api/automation-roles'),
+                fetchJson('/api/automation-business-units'),
             ])
 
             setWorkflows(workflowData.data || [])
             setAutomationProjects(projectData.data || [])
-            setLastRefreshed(new Date())
+            setAutomationFunctions(functionData.data || [])
+            setAutomationRoles(roleData.data || [])
+            setAutomationBusinessUnits(businessUnitData.data || [])
 
             setVersionDetails({})
             setVersionError({})
@@ -490,6 +626,9 @@ export default function WorkflowsPage() {
             lifecycle_stage?: string | null
             business_owner?: string | null
             operational_notes?: string | null
+            business_function_id?: string | null
+            business_unit_id?: string | null
+            supported_role_ids?: string[]
         }
     ) => {
         setMetadataUpdatingId(workflowId)
@@ -519,6 +658,16 @@ export default function WorkflowsPage() {
                             lifecycle_stage: updatedMetadata.lifecycle_stage,
                             business_owner: updatedMetadata.business_owner,
                             operational_notes: updatedMetadata.operational_notes,
+
+                            business_function_id: updatedMetadata.business_function_id,
+                            business_function_name: updatedMetadata.business_function_name,
+                            business_function_slug: updatedMetadata.business_function_slug,
+                            supported_role_ids: updatedMetadata.supported_role_ids || [],
+                            supported_role_names: updatedMetadata.supported_role_names || [],
+                            supported_role_slugs: updatedMetadata.supported_role_slugs || [],
+                            business_unit_id: updatedMetadata.business_unit_id,
+                            business_unit_name: updatedMetadata.business_unit_name,
+                            business_unit_slug: updatedMetadata.business_unit_slug,
                         }
                         : workflow
                 )
@@ -1400,83 +1549,139 @@ export default function WorkflowsPage() {
                                                                 )}
                                                             </div>
 
-                                                            <div className="grid gap-3 md:grid-cols-3">
-                                                                <select
-                                                                    value={workflow.automation_type || ''}
-                                                                    disabled={metadataUpdatingId === workflow.id}
-                                                                    onChange={event =>
-                                                                        updateWorkflowMetadata(workflow.id, {
-                                                                            automation_type: event.target.value || null,
-                                                                        })
-                                                                    }
-                                                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
-                                                                >
-                                                                    <option value="">Type: Not set</option>
-                                                                    <option value="Workflow">Workflow</option>
-                                                                    <option value="AI Agent">AI Agent</option>
-                                                                </select>
+                                                            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                                                                <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                                    Automation Type
+                                                                    <select
+                                                                        value={workflow.automation_type || ''}
+                                                                        disabled={metadataUpdatingId === workflow.id}
+                                                                        onChange={event =>
+                                                                            updateWorkflowMetadata(workflow.id, {
+                                                                                automation_type: event.target.value || null,
+                                                                            })
+                                                                        }
+                                                                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                    >
+                                                                        <option value="">Not set</option>
+                                                                        <option value="Workflow">Workflow</option>
+                                                                        <option value="AI Agent">AI Agent</option>
+                                                                    </select>
+                                                                </label>
 
-                                                                <select
-                                                                    value={workflow.lifecycle_stage || ''}
-                                                                    disabled={metadataUpdatingId === workflow.id}
-                                                                    onChange={event =>
-                                                                        updateWorkflowMetadata(workflow.id, {
-                                                                            lifecycle_stage: event.target.value || null,
-                                                                        })
-                                                                    }
-                                                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
-                                                                >
-                                                                    <option value="">Stage: Not set</option>
-                                                                    <option value="Production">Production</option>
-                                                                    <option value="Development">Development</option>
-                                                                    <option value="Paused/Retired">Paused/Retired</option>
-                                                                    <option value="Ad hoc">Ad hoc</option>
-                                                                </select>
+                                                                <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                                    Lifecycle Stage
+                                                                    <select
+                                                                        value={workflow.lifecycle_stage || ''}
+                                                                        disabled={metadataUpdatingId === workflow.id}
+                                                                        onChange={event =>
+                                                                            updateWorkflowMetadata(workflow.id, {
+                                                                                lifecycle_stage: event.target.value || null,
+                                                                            })
+                                                                        }
+                                                                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                    >
+                                                                        <option value="">Not set</option>
+                                                                        <option value="Production">Production</option>
+                                                                        <option value="Development">Development</option>
+                                                                        <option value="Paused/Retired">Paused/Retired</option>
+                                                                        <option value="Ad hoc">Ad hoc</option>
+                                                                    </select>
+                                                                </label>
 
-                                                                <input
-                                                                    type="text"
-                                                                    value={workflow.business_owner || ''}
-                                                                    disabled={metadataUpdatingId === workflow.id}
-                                                                    onChange={event =>
-                                                                        setWorkflows(prev =>
-                                                                            prev.map(item =>
-                                                                                item.id === workflow.id
-                                                                                    ? { ...item, business_owner: event.target.value }
-                                                                                    : item
-                                                                            )
-                                                                        )
-                                                                    }
-                                                                    onBlur={event =>
-                                                                        updateWorkflowMetadata(workflow.id, {
-                                                                            business_owner: event.target.value || null,
-                                                                        })
-                                                                    }
-                                                                    placeholder="Business owner"
-                                                                    className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
-                                                                />
+                                                                <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                                    Function
+                                                                    <select
+                                                                        value={workflow.business_function_id || ''}
+                                                                        disabled={metadataUpdatingId === workflow.id}
+                                                                        onChange={event =>
+                                                                            updateWorkflowMetadata(workflow.id, {
+                                                                                business_function_id: event.target.value || null,
+                                                                            })
+                                                                        }
+                                                                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                    >
+                                                                        <option value="">Not set</option>
+
+                                                                        {automationFunctions.map(functionItem => (
+                                                                            <option
+                                                                                key={functionItem.function_id}
+                                                                                value={functionItem.function_id}
+                                                                            >
+                                                                                {functionItem.function_name}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                </label>
+
+                                                                <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                                    Owning Department
+                                                                    <select
+                                                                        value={workflow.business_unit_id || ''}
+                                                                        disabled={metadataUpdatingId === workflow.id}
+                                                                        onChange={event =>
+                                                                            updateWorkflowMetadata(workflow.id, {
+                                                                                business_unit_id: event.target.value || null,
+                                                                            })
+                                                                        }
+                                                                        className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                    >
+                                                                        <option value="">Not set</option>
+
+                                                                        {automationBusinessUnits.map(unit => (
+                                                                            <option
+                                                                                key={unit.business_unit_id}
+                                                                                value={unit.business_unit_id}
+                                                                            >
+                                                                                {unit.business_unit_name}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                </label>
                                                             </div>
 
-                                                            <textarea
-                                                                value={workflow.operational_notes || ''}
-                                                                disabled={metadataUpdatingId === workflow.id}
-                                                                onChange={event =>
-                                                                    setWorkflows(prev =>
-                                                                        prev.map(item =>
-                                                                            item.id === workflow.id
-                                                                                ? { ...item, operational_notes: event.target.value }
-                                                                                : item
-                                                                        )
-                                                                    )
-                                                                }
-                                                                onBlur={event =>
-                                                                    updateWorkflowMetadata(workflow.id, {
-                                                                        operational_notes: event.target.value || null,
-                                                                    })
-                                                                }
-                                                                placeholder="Operational notes, dependencies, risks, reminders, or handoff context..."
-                                                                rows={3}
-                                                                className="mt-3 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
-                                                            />
+                                                            <div className="mt-3 grid gap-3 md:grid-cols-2">
+                                                                <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                                    Supported Roles
+
+                                                                    <SupportedRolesDropdown
+                                                                        roles={automationRoles}
+                                                                        selectedRoleIds={workflow.supported_role_ids || []}
+                                                                        disabled={metadataUpdatingId === workflow.id}
+                                                                        onChange={selectedRoleIds =>
+                                                                            updateWorkflowMetadata(workflow.id, {
+                                                                                supported_role_ids: selectedRoleIds,
+                                                                            })
+                                                                        }
+                                                                    />
+                                                                </label>
+
+                                                                <label className="flex flex-col gap-1 text-xs font-medium text-gray-500 dark:text-gray-400">
+                                                                    Operational Notes
+                                                                    <textarea
+                                                                        value={workflow.operational_notes || ''}
+                                                                        disabled={metadataUpdatingId === workflow.id}
+                                                                        onChange={event =>
+                                                                            setWorkflows(prev =>
+                                                                                prev.map(item =>
+                                                                                    item.id === workflow.id
+                                                                                        ? { ...item, operational_notes: event.target.value }
+                                                                                        : item
+                                                                                )
+                                                                            )
+                                                                        }
+                                                                        onBlur={event =>
+                                                                            updateWorkflowMetadata(workflow.id, {
+                                                                                operational_notes: event.target.value || null,
+                                                                            })
+                                                                        }
+                                                                        placeholder="Dependencies, risks, reminders, workflow context, or handoff notes..."
+                                                                        rows={6}
+                                                                        className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 disabled:opacity-50 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200"
+                                                                    />
+                                                                </label>
+                                                            </div>
+
+
                                                         </div>
 
                                                         {versionError[workflow.id] && (
