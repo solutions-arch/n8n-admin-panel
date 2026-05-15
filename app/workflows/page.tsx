@@ -450,7 +450,8 @@ export default function WorkflowsPage() {
 
     const [searchQuery, setSearchQuery] = useState('')
     const [sortOption, setSortOption] = useState<SortOption>('updated-desc')
-    const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+    const [statusFilter, setStatusFilter] = useState<StatusFilter>('active')
+    const [includeArchived, setIncludeArchived] = useState(false)
     const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
     const [stageFilter, setStageFilter] = useState<StageFilter>('all')
     const [projectFilter, setProjectFilter] = useState<ProjectFilter>('all')
@@ -515,6 +516,7 @@ export default function WorkflowsPage() {
         typeFilter,
         stageFilter,
         projectFilter,
+        includeArchived,
         pageSize,
     ])
 
@@ -822,9 +824,14 @@ export default function WorkflowsPage() {
 
         return projectScopedWorkflows
             .filter(workflow => {
+                const isArchived = workflow.isArchived === true
+
+                if (!includeArchived && isArchived) return false
+
                 if (statusFilter === 'active') return workflow.active === true
                 if (statusFilter === 'inactive') return workflow.active === false
-                if (statusFilter === 'archived') return workflow.isArchived === true
+                if (statusFilter === 'archived') return isArchived
+
                 return true
             })
             .filter(workflow => {
@@ -910,6 +917,7 @@ export default function WorkflowsPage() {
         statusFilter,
         typeFilter,
         stageFilter,
+        includeArchived,
         versionDetails,
     ])
 
@@ -930,10 +938,11 @@ export default function WorkflowsPage() {
 
     const clearFilters = () => {
         setSearchQuery('')
-        setStatusFilter('all')
+        setStatusFilter('active')
         setTypeFilter('all')
         setStageFilter('all')
         setProjectFilter('all')
+        setIncludeArchived(false)
         setSortOption('updated-desc')
         setCurrentPage(1)
     }
@@ -975,6 +984,9 @@ export default function WorkflowsPage() {
 
                     <p className="mt-1 text-sm text-gray-400 dark:text-gray-500">
                         Showing {filteredWorkflows.length} of {projectScopedWorkflows.length} workflows
+                        {statusFilter === 'active' && ' · Active only'}
+                        {!includeArchived && ' · Archived hidden'}
+                        {includeArchived && ' · Archived included'}
                         {projectFilter !== 'all' && ` · Project: ${selectedProjectLabel}`}
                         {typeFilter !== 'all' && ` · Type: ${typeFilter}`}
                         {stageFilter !== 'all' && ` · Stage: ${stageFilter}`}
@@ -1023,9 +1035,10 @@ export default function WorkflowsPage() {
                         value={projectFilter}
                         onChange={e => {
                             setProjectFilter(e.target.value as ProjectFilter)
-                            setStatusFilter('all')
+                            setStatusFilter('active')
                             setTypeFilter('all')
                             setStageFilter('all')
+                            setIncludeArchived(false)
                             setCurrentPage(1)
                         }}
                         className="rounded-lg border border-gray-200 bg-white px-4 py-2 text-sm text-gray-700 outline-none transition focus:border-gray-400 focus:ring-2 focus:ring-gray-100 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-200 dark:focus:border-gray-500 dark:focus:ring-gray-800"
@@ -1044,11 +1057,22 @@ export default function WorkflowsPage() {
                         <option value="unassigned">Project: Unassigned</option>
                     </select>
 
+                    <label className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-950 dark:text-gray-300">
+                        <input
+                            type="checkbox"
+                            checked={includeArchived}
+                            onChange={event => setIncludeArchived(event.target.checked)}
+                            className="h-4 w-4 rounded border-gray-300"
+                        />
+                        Include archived
+                    </label>
+
                     {(searchQuery ||
-                        statusFilter !== 'all' ||
+                        statusFilter !== 'active' ||
                         typeFilter !== 'all' ||
                         stageFilter !== 'all' ||
                         projectFilter !== 'all' ||
+                        includeArchived ||
                         sortOption !== 'updated-desc') && (
                             <button
                                 onClick={clearFilters}
@@ -1093,7 +1117,10 @@ export default function WorkflowsPage() {
                     label="Archived"
                     value={operationalCounts.archived}
                     active={statusFilter === 'archived'}
-                    onClick={() => setStatusFilter('archived')}
+                    onClick={() => {
+                        setIncludeArchived(true)
+                        setStatusFilter('archived')
+                    }}
                     colorClass="text-orange-500 dark:text-orange-400"
                 />
             </div>
